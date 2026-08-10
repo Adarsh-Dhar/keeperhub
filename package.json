@@ -1,0 +1,29 @@
+{
+  "name": "keeperhub-position-guardian",
+  "version": "0.1.0",
+  "description": "Autonomous Aave V3 health-factor guardian agent, built on KeeperHub's MCP server, with a marketplace/x402 pay-per-call demo.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "setup:workflow": "tsx src/workflows/setupGuardianWorkflow.ts",
+    "guardian:once": "tsx src/runGuardian.ts --once",
+    "guardian:watch": "tsx src/runGuardian.ts --watch",
+    "marketplace:list": "tsx src/marketplace/listWorkflow.ts",
+    "marketplace:pay": "tsx src/marketplace/consumerPay.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^0.3.0",
+    "@modelcontextprotocol/sdk": "^1.9.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0",
+    "x402-fetch": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}
