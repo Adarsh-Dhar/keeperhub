@@ -50,13 +50,22 @@ export async function runAgent(
         systemInstruction: systemPrompt,
         generationConfig: {
           maxOutputTokens: 2048,
+          temperature: 0.7,
         },
         tools: [{ functionDeclarations }],
       },
     });
 
-    const responseText = response.response.text();
-    const functionCalls = response.functionCalls();
+    const responseText = response.response?.text?.() || "";
+    
+    // Extract function calls from the response
+    const functionCalls: any[] = [];
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.functionCall) {
+        functionCalls.push(part.functionCall);
+      }
+    }
 
     // Log the assistant's text response
     if (responseText.trim()) {
@@ -64,14 +73,14 @@ export async function runAgent(
     }
 
     // No function calls left => Gemini is done reasoning/acting.
-    if (!functionCalls || functionCalls.length === 0) {
-      const finalText = responseText.trim();
+    if (functionCalls.length === 0) {
+      const finalText = responseText.trim() || "No text response from model";
       transcript.push({ type: "final", text: finalText });
       return { transcript, finalText };
     }
 
     // Add the assistant's response to the conversation
-    contents.push({ role: "model", parts: response.response.candidates[0].content.parts });
+    contents.push({ role: "model", parts: parts });
 
     // Process each function call
     for (const call of functionCalls) {
@@ -90,18 +99,13 @@ export async function runAgent(
       transcript.push({ type: "tool_result", text: resultText });
     }
 
-    // Add function responses as a new user message
-    const functionResponses = functionCalls.map((call, index) => {
+    // Add function responses as a new user message using text format
+    const resultTexts = functionCalls.map((call, index) => {
       const resultText = transcript.filter(s => s.type === "tool_result")[index]?.text || "(empty)";
-      return {
-        functionResponse: {
-          name: call.name,
-          response: { result: resultText },
-        },
-      };
-    });
-
-    contents.push({ role: "user", parts: functionResponses });
+      return `Tool ${call.name} returned: ${resultText}`;
+    }).join("\n\n");
+    
+    contents.push({ role: "user", parts: [{ text: resultTexts }] });
   }
 
   const timeoutMsg = "Agent hit MAX_TURNS without reaching a final answer — stopping for safety.";

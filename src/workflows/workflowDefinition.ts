@@ -92,7 +92,7 @@ export function buildGuardianWorkflowNodes() {
           discordMessage:
             "Position Guardian: health factor dropped below " +
             String(config.position.healthFactorThreshold) +
-            " for {{@trigger-schedule}}. Repay executed: {{@repay-debt.transactionLink}}",
+            " for {{@trigger-schedule:Every 15 minutes.triggeredAt}}. Repay executed: {{@repay-debt:Repay Aave V3 debt.transactionLink}}",
         },
         status: "idle",
       },
