@@ -41,7 +41,7 @@ export function buildGuardianWorkflowNodes() {
         config: {
           actionType: "aave-v3/get-user-account-data",
           network: config.position.chainId,
-          userAddress: config.position.walletAddress,
+          user: config.position.walletAddress,
         },
         status: "idle",
       },
@@ -74,10 +74,9 @@ export function buildGuardianWorkflowNodes() {
         config: {
           actionType: "aave-v3/repay",
           network: config.position.chainId,
+          asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC on Ethereum mainnet (example)
+          amount: "1000000", // 1 USDC (6 decimals) - should be calculated dynamically
           onBehalfOf: config.position.walletAddress,
-          // amount left as "max available in wallet" at creation time; refine
-          // via search_protocol_actions once the exact field name is confirmed
-          amount: "auto",
         },
         status: "idle",
       },
@@ -90,7 +89,7 @@ export function buildGuardianWorkflowNodes() {
         type: "action",
         config: {
           actionType: "discord/send-message",
-          message:
+          discordMessage:
             "Position Guardian: health factor dropped below " +
             String(config.position.healthFactorThreshold) +
             " for {{@trigger-schedule}}. Repay executed: {{@repay-debt.transactionLink}}",

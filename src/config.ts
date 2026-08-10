@@ -24,7 +24,7 @@ export const config = {
     model: optional("GEMINI_MODEL", "gemini-2.5-pro"),
   },
   position: {
-    chainId: optional("CHAIN_ID", "11155111"),
+    chainId: optional("CHAIN_ID", "1"), // Default to Ethereum mainnet (supported by Aave V3)
     walletAddress: required("GUARDIAN_WALLET_ADDRESS"),
     healthFactorThreshold: Number(optional("HEALTH_FACTOR_THRESHOLD", "1.5")),
   },

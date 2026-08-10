@@ -8,9 +8,9 @@ import { buildGuardianWorkflowNodes } from "./workflowDefinition.js";
  * 1. Discovers the real Aave V3 action schemas (field names change between
  *    KeeperHub releases, so we never hardcode them blindly).
  * 2. Builds the workflow graph.
- * 3. Validates it server-side.
- * 4. Creates it DISABLED so a human confirms before it can move funds.
- * 5. Prints the workflow ID needed by runGuardian.ts and the marketplace scripts.
+ * 3. Creates it DISABLED so a human confirms before it can move funds.
+ *    (create_workflow validates the structure server-side before saving).
+ * 4. Prints the workflow ID needed by runGuardian.ts and the marketplace scripts.
  */
 async function main() {
   const mcp = createKeeperHubClient();
@@ -27,10 +27,6 @@ async function main() {
   );
 
   const { nodes, edges } = buildGuardianWorkflowNodes();
-
-  console.log("Validating workflow structure...");
-  const validation = await mcp.callTool("validate_workflow", { nodes, edges });
-  console.log(validation);
 
   console.log("Creating workflow (disabled by default)...");
   const created = await mcp.callTool("create_workflow", {
