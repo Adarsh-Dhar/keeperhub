@@ -38,12 +38,13 @@ async function main() {
   console.log("Setting listing metadata and price...");
   const updated = await mcp.callTool("update_workflow_listing", {
     slug: config.marketplace.workflowSlug,
+    workflowId: workflowId,
     description:
       "Checks an Aave V3 position's health factor on demand and repays if it is at risk. " +
       "Pay-per-call guardian check for agents managing their own lending positions.",
     category: "defi-risk-management",
     tags: ["aave", "defi", "risk", "health-factor"],
-    priceUsd: "0.02",
+    priceUsd: "0.01",
   });
   console.log(updated);
 

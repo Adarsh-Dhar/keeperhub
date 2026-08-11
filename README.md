@@ -33,7 +33,7 @@ marketplace/
 - Node.js 18.17+
 - A KeeperHub account and organization API key (`kh_...`) — Settings > API Keys
 - A Google AI Studio API key
-- A funded Ethereum Sepolia wallet with an open Aave V3 position (some
+- A funded Base Sepolia wallet with an open Aave V3 position (some
   collateral supplied, some debt borrowed) — this is your test fixture
 - (Stretch) a second, throwaway Base Sepolia wallet with a little test USDC,
   for the marketplace payment demo
@@ -83,7 +83,7 @@ position is healthy.
    (borrow a bit more, or lower the threshold temporarily).
 2. Run `npm run guardian:once` again and watch the transcript: it should read
    the at-risk health factor, simulate the repay, execute it, poll for
-   completion, and report a real Sepolia transaction hash.
+   completion, and report a real Base Sepolia transaction hash.
 3. Check the Discord channel wired into the workflow's `notify-discord` node
    for the alert — this is your primary demo clip.
 4. For continuous monitoring instead of one-shot: `npm run guardian:watch`.
@@ -110,7 +110,7 @@ hack time.
   indefinitely against a wallet with real value.
 - The workflow is created **disabled**; you enable it deliberately after
   reviewing it.
-- Use testnets (Sepolia / Base Sepolia) throughout. Do not point
+- Use testnets (Base Sepolia) throughout. Do not point
   `GUARDIAN_WALLET_ADDRESS` at a mainnet position while iterating.
 
 ## What's a skeleton vs. what's load-bearing

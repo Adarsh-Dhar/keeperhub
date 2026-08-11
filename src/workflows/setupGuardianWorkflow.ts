@@ -26,44 +26,53 @@ async function main() {
       "and adjust `actionType`/argument names if they differ before continuing.\n"
   );
 
-  // Check if workflow already exists
+  // Use the specific workflow ID 903hqwcjkqmwsf9q204xa
+  const targetWorkflowId = "903hqwcjkqmwsf9q204xa";
+  console.log(`Using specific workflow ID: ${targetWorkflowId}`);
+
+  // Check if workflow exists
   console.log("Checking for existing workflows...");
   const existingWorkflows = await mcp.callTool("list_workflows", {});
   const workflowName = "Position Guardian — Aave V3";
   const existingWorkflow = JSON.parse(existingWorkflows).find(
-    (w: any) => w.name === workflowName
+    (w: any) => w.id === targetWorkflowId
   );
 
   if (existingWorkflow) {
-    console.log(`Found existing workflow: ${existingWorkflow.id}`);
+    console.log(`Found target workflow: ${existingWorkflow.id}`);
     console.log(`Status: ${existingWorkflow.enabled ? "ENABLED" : "DISABLED"}`);
     console.log(`Last updated: ${existingWorkflow.updatedAt}`);
     
     // Always update to use latest configuration (chain/network changes)
-    console.log("\nUpdating existing workflow with latest configuration...");
+    console.log("\nUpdating target workflow with latest configuration...");
     const { nodes, edges } = buildGuardianWorkflowNodes();
     const updated = await mcp.callTool("update_workflow", {
-      workflowId: existingWorkflow.id,
+      workflowId: targetWorkflowId,
       nodes,
       edges,
-      enabled: existingWorkflow.enabled, // Preserve enabled status
+      enabled: true, // Ensure it's enabled
+      inputSchema: { type: "object" }, // Required for marketplace listing
     });
     console.log(updated);
-    console.log(`\nWorkflow updated. Dashboard link: https://app.keeperhub.com/workflows/${existingWorkflow.id}`);
+    console.log(`\nWorkflow updated. Dashboard link: https://app.keeperhub.com/workflows/${targetWorkflowId}`);
   } else {
+    console.log(`Target workflow ${targetWorkflowId} not found. Creating new workflow...`);
     const { nodes, edges } = buildGuardianWorkflowNodes();
 
-    console.log("Creating new workflow (disabled by default)...");
+    console.log("Creating new workflow (enabled by default for marketplace)...");
     const created = await mcp.callTool("create_workflow", {
       name: workflowName,
       description:
         "Monitors an Aave V3 health factor and auto-repays when it drops below the configured threshold.",
       nodes,
       edges,
-      enabled: false,
+      enabled: true,
+      inputSchema: { type: "object" }, // Required for marketplace listing
     });
     console.log(created);
-    console.log(`\nDashboard link: https://app.keeperhub.com/workflows/${JSON.parse(created).id}`);
+    const newWorkflowId = JSON.parse(created).id;
+    console.log(`\nIMPORTANT: Update workflow ID reference to ${newWorkflowId}`);
+    console.log(`Dashboard link: https://app.keeperhub.com/workflows/${newWorkflowId}`);
   }
 
   console.log(

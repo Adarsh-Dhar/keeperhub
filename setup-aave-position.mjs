@@ -2,7 +2,7 @@
 /**
  * setup-aave-position.mjs
  *
- * Opens a real Aave V3 test position on Ethereum Sepolia, end to end:
+ * Opens a real Aave V3 test position on Base Sepolia, end to end:
  *   1. Mint test USDC from Aave's testnet Faucet
  *   2. Approve the Aave Pool to pull that USDC
  *   3. Supply USDC as collateral
@@ -14,7 +14,7 @@
  * Env vars (put these in a .env and `node --env-file=.env setup-aave-position.mjs`,
  * or export them in your shell first):
  *   PRIVATE_KEY          - test wallet private key, 0x-prefixed (NEVER use a real-funds wallet)
- *   RPC_URL              - optional, defaults to a public Sepolia RPC
+ *   RPC_URL              - optional, defaults to a public Base Sepolia RPC
  *   MINT_USDC_AMOUNT     - optional, human units, defaults to "100"
  *   SUPPLY_USDC_AMOUNT   - optional, human units, defaults to "15"
  *   BORROW_DAI_AMOUNT    - optional, human units, defaults to "5"
@@ -32,13 +32,13 @@ import {
   getContract,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { baseSepolia } from "viem/chains";
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-const RPC_URL = process.env.RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
+const RPC_URL = process.env.RPC_URL || "https://sepolia.base.org";
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
 if (!PRIVATE_KEY) {
@@ -46,13 +46,13 @@ if (!PRIVATE_KEY) {
   process.exit(1);
 }
 
-// Aave V3 Sepolia core contracts (aave-address-book, AaveV3Sepolia library)
-const POOL = "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951";
+// Aave V3 Base Sepolia core contracts (aave-address-book, AaveV3BaseSepolia library)
+const POOL = "0x0E5Da3a3DAd88C62EA79750bF4996e35Ae0A5De6";
 const FAUCET = "0xC959483DBa39aa9E78757139af0e9a2EDEb3f42D";
 
-// Reserve assets on the Sepolia market
-const USDC = { address: "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8", decimals: 6, symbol: "USDC" };
-const DAI = { address: "0xFF34B3d4Aee8ddCd6F9AFFFB6Fe49bD371b8a357", decimals: 18, symbol: "DAI" };
+// Reserve assets on the Base Sepolia market
+const USDC = { address: "0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f", decimals: 6, symbol: "USDC" };
+const DAI = { address: "0x61619E9316D414091Aa4f3D94b913C5c5e0b8aa2", decimals: 18, symbol: "DAI" };
 
 const MINT_USDC_AMOUNT = process.env.MINT_USDC_AMOUNT || "100";
 const SUPPLY_USDC_AMOUNT = process.env.SUPPLY_USDC_AMOUNT || "15";
@@ -143,8 +143,8 @@ const VARIABLE_RATE_MODE = 2n; // Aave V3 stable-rate borrowing is deprecated ma
 
 const account = privateKeyToAccount(PRIVATE_KEY);
 
-const publicClient = createPublicClient({ chain: sepolia, transport: http(RPC_URL) });
-const walletClient = createWalletClient({ account, chain: sepolia, transport: http(RPC_URL) });
+const publicClient = createPublicClient({ chain: baseSepolia, transport: http(RPC_URL) });
+const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(RPC_URL) });
 
 const usdcContract = getContract({ address: USDC.address, abi: erc20Abi, client: walletClient });
 const daiContract = getContract({ address: DAI.address, abi: erc20Abi, client: { public: publicClient, wallet: walletClient } });
@@ -162,11 +162,11 @@ async function sendAndWait(label, txPromise) {
   console.log(`   waiting for confirmation...`);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (receipt.status !== "success") {
-    console.error(`   REVERTED. See https://sepolia.etherscan.io/tx/${hash}`);
+    console.error(`   REVERTED. See https://sepolia.basescan.org/tx/${hash}`);
     process.exit(1);
   }
   console.log(`   confirmed in block ${receipt.blockNumber}`);
-  console.log(`   https://sepolia.etherscan.io/tx/${hash}`);
+  console.log(`   https://sepolia.basescan.org/tx/${hash}`);
   return receipt;
 }
 
@@ -188,7 +188,7 @@ async function main() {
   const ethBalance = await publicClient.getBalance({ address: account.address });
   console.log(`ETH balance: ${formatUnits(ethBalance, 18)} ETH`);
   if (ethBalance === 0n) {
-    console.error("\nNo Sepolia ETH for gas. Fund this wallet first (see faucet links in the setup guide).");
+    console.error("\nNo Base Sepolia ETH for gas. Fund this wallet first (see faucet links in the setup guide).");
     process.exit(1);
   }
 
