@@ -30,7 +30,18 @@ async function runOnce(): Promise<void> {
   if (healthFactor && Number(healthFactor) >= config.position.healthFactorThreshold) {
     summary = `Position is healthy. Current health factor: ${healthFactor} (threshold: ${config.position.healthFactorThreshold}). No action needed.`;
   } else {
-    summary = `Position at risk. Current health factor: ${healthFactor} (threshold: ${config.position.healthFactorThreshold}). Manual intervention required.`;
+    // Position at risk - trigger the KeeperHub workflow to execute repay
+    console.log("Position at risk - triggering KeeperHub workflow execution...");
+    try {
+      const workflowResult = await mcp.callTool("execute_workflow", {
+        workflowId: "o290nx7z5e7t79ulmij9x",
+      });
+      console.log("Workflow execution triggered:", workflowResult);
+      summary = `Position at risk. Current health factor: ${healthFactor} (threshold: ${config.position.healthFactorThreshold}). Auto-repay workflow triggered via KeeperHub.`;
+    } catch (error) {
+      console.error("Failed to trigger workflow:", error);
+      summary = `Position at risk. Current health factor: ${healthFactor} (threshold: ${config.position.healthFactorThreshold}). Failed to trigger auto-repay workflow.`;
+    }
   }
 
   console.log(`\n=== SUMMARY ===\n${summary}\n`);

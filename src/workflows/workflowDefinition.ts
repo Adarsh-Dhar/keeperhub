@@ -74,7 +74,7 @@ export function buildGuardianWorkflowNodes() {
         config: {
           actionType: "aave-v3/repay",
           network: config.position.chainId,
-          asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC on Ethereum mainnet (example)
+          asset: "0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f", // USDC on Base Sepolia
           amount: "1000000", // 1 USDC (6 decimals) - should be calculated dynamically
           onBehalfOf: config.position.walletAddress,
         },

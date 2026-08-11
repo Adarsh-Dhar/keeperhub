@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "setup:workflow": "tsx src/workflows/setupGuardianWorkflow.ts",
+    "setup:aave": "tsx setup-aave-position.ts",
     "guardian:once": "tsx src/runGuardian.ts --once",
     "guardian:watch": "tsx src/runGuardian.ts --watch",
     "marketplace:list": "tsx src/marketplace/listWorkflow.ts",
