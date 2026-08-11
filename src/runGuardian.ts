@@ -7,13 +7,15 @@ async function runOnce(): Promise<void> {
   await mcp.connect();
 
   console.log(`\n[${new Date().toISOString()}] Guardian run starting...`);
+  console.log(`Checking wallet: ${config.position.walletAddress}`);
+  console.log(`Chain ID: ${config.position.chainId}`);
   
   // Direct approach: call the protocol action and analyze the result
   const healthResult = await mcp.callTool("execute_protocol_action", {
     actionType: "aave-v3/get-user-account-data",
     params: {
       network: config.position.chainId,
-      user: config.position.walletAddress,
+      user: config.position.walletAddress.toLowerCase(),
     },
   });
 
@@ -21,6 +23,8 @@ async function runOnce(): Promise<void> {
   
   const healthData = JSON.parse(healthResult);
   const healthFactor = healthData.result?.healthFactor;
+  const totalCollateral = healthData.result?.totalCollateralBase;
+  const totalDebt = healthData.result?.totalDebtBase;
   
   let summary: string;
   if (healthFactor && Number(healthFactor) >= config.position.healthFactorThreshold) {
