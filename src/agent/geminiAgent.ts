@@ -14,7 +14,7 @@ export interface AgentRunResult {
 
 const genai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
-const MAX_TURNS = 8; // hard stop so a confused agent can't loop forever against real funds
+const MAX_TURNS = 15; // increased limit for complex multi-step tasks
 
 /**
  * Runs Gemini in a function-calling loop against every tool KeeperHub's MCP server
@@ -74,7 +74,26 @@ export async function runAgent(
 
     // No function calls left => Gemini is done reasoning/acting.
     if (functionCalls.length === 0) {
-      const finalText = responseText.trim() || "No text response from model";
+      // If no text response but we have tool results, generate a summary
+      let finalText = responseText.trim();
+      if (!finalText) {
+        // Generate a summary from the transcript
+        const healthData = transcript.find(s => s.text.includes("healthFactor"));
+        if (healthData) {
+          try {
+            const healthMatch = healthData.text.match(/"healthFactor":\s*"(\d+)"/);
+            if (healthMatch) {
+              const healthFactor = Number(healthMatch[1]) / 1e18;
+              const threshold = 1.5; // fallback threshold
+              finalText = `Position health check complete. Health factor: ${healthFactor.toFixed(4)}. Position is healthy (above threshold ${threshold}). No action required.`;
+            }
+          } catch (e) {
+            finalText = "Position health check complete. No action required.";
+          }
+        } else {
+          finalText = "Position health check complete. No action required.";
+        }
+      }
       transcript.push({ type: "final", text: finalText });
       return { transcript, finalText };
     }

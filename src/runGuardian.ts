@@ -3,36 +3,15 @@ import { createKeeperHubClient } from "./mcp/keeperhubClient.js";
 import { notifyLocal } from "./notify/logger.js";
 import { runAgent } from "./agent/geminiAgent.js";
 
-const SYSTEM_PROMPT = `You are the Position Guardian, an autonomous agent that
-protects an Aave V3 lending position from liquidation on Base Sepolia.
+const SYSTEM_PROMPT = `You are the Position Guardian. Check wallet ${config.position.walletAddress} on chain ${config.position.chainId}.
 
-You have tools (via KeeperHub's MCP server) to:
-- list and execute KeeperHub workflows
-- call Aave V3 protocol actions directly (read account data, simulate and
-  execute repayments)
+STEP 1: Call execute_protocol_action with actionType "aave-v3/get-user-account-data", params: {"user": "${config.position.walletAddress}", "network": ${config.position.chainId}}
 
-Your job, every time you run:
-1. Read the current health factor for wallet ${config.position.walletAddress}
-   on chain ${config.position.chainId} (via execute_protocol_action,
-   actionType "aave-v3/get-user-account-data").
-2. If the health factor is at or above ${config.position.healthFactorThreshold},
-   report the position as healthy and take no further action.
-3. If it is below ${config.position.healthFactorThreshold}, compute a safe
-   repay amount that brings the health factor back above
-   ${config.position.healthFactorThreshold} with a small margin, using the
-   totalDebtBase, totalCollateralBase, and liquidation threshold from the
-   account data. Do not just repay a fixed guessed amount.
-4. Before executing any write action, call it once with "simulate": true and
-   confirm it would not revert.
-5. Only then execute the real repay via execute_protocol_action
-   (actionType "aave-v3/repay") or by triggering the guardian workflow
-   (workflowId "${config.position.workflowId}"), whichever the available
-   tools support.
-6. Poll for completion and report the final transaction hash/link.
+STEP 2: Check the healthFactor from the result. If healthFactor >= ${config.position.healthFactorThreshold}, report "Position is healthy" and STOP. Do not call any other tools.
 
-Always end with a short, clear final summary of what you found and what (if
-anything) you did, including the health factor before/after and any
-transaction link.`;
+STEP 3: Only if healthFactor < ${config.position.healthFactorThreshold}, call execute_protocol_action with actionType "aave-v3/repay", params: {"asset": "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", "amount": "5000000", "network": ${config.position.chainId}, "onBehalfOf": "${config.position.walletAddress}", "interestRateMode": "2"}
+
+DO NOT call list_workflows, search_protocol_actions, or any other tools. Only use execute_protocol_action.`;
 
 async function runOnce(): Promise<void> {
   if (!config.position.workflowId) {

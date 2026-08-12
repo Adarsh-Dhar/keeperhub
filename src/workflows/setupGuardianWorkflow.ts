@@ -46,18 +46,37 @@ async function main() {
     console.log(`Found existing workflow: ${existingWorkflow.id}`);
     console.log(`Status: ${existingWorkflow.enabled ? "ENABLED" : "DISABLED"}`);
 
-    console.log("\nUpdating existing workflow with latest configuration...");
-    const updated = await mcp.callTool("update_workflow", {
-      workflowId: existingWorkflow.id,
-      nodes,
-      edges,
-      inputSchema: { type: "object" }, // Required for marketplace listing
-      // enabled intentionally omitted — don't flip an already-reviewed
-      // workflow's enabled state as a side effect of a config update.
-    });
-    console.log(updated);
-    writeWorkflowIdToEnv(existingWorkflow.id);
-    console.log(`Dashboard link: https://app.keeperhub.com/workflows/${existingWorkflow.id}`);
+    console.log("\nAttempting to update existing workflow with latest configuration...");
+    try {
+      const updated = await mcp.callTool("update_workflow", {
+        workflowId: existingWorkflow.id,
+        nodes,
+        edges,
+        inputSchema: { type: "object" }, // Required for marketplace listing
+        // enabled intentionally omitted — don't flip an already-reviewed
+        // workflow's enabled state as a side effect of a config update.
+      });
+      console.log(updated);
+      writeWorkflowIdToEnv(existingWorkflow.id);
+      console.log(`Dashboard link: https://app.keeperhub.com/workflows/${existingWorkflow.id}`);
+    } catch (updateError) {
+      console.error(`Failed to update workflow: ${updateError}`);
+      console.log("Creating a new workflow instead...");
+      
+      const created = await mcp.callTool("create_workflow", {
+        name: WORKFLOW_NAME,
+        description:
+          "Monitors an Aave V3 health factor and auto-repays when it drops below the configured threshold.",
+        nodes,
+        edges,
+        enabled: false, // created disabled — a human enables it deliberately after review
+        inputSchema: { type: "object" }, // Required for marketplace listing
+      });
+      console.log(created);
+      const newWorkflowId = JSON.parse(created).id;
+      writeWorkflowIdToEnv(newWorkflowId);
+      console.log(`Dashboard link: https://app.keeperhub.com/workflows/${newWorkflowId}`);
+    }
   } else {
     console.log(`No existing "${WORKFLOW_NAME}" workflow found. Creating a new one...`);
     const created = await mcp.callTool("create_workflow", {
