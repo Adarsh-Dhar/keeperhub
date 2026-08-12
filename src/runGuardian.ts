@@ -1,17 +1,55 @@
 import { config } from "./config.js";
 import { createKeeperHubClient } from "./mcp/keeperhubClient.js";
 import { notifyLocal } from "./notify/logger.js";
-import { calculateRepayAmount } from "./workflows/workflowDefinition.js";
-import { executeDirectRepay } from "./executeDirect.js";
+import { runAgent } from "./agent/geminiAgent.js";
+
+const SYSTEM_PROMPT = `You are the Position Guardian, an autonomous agent that
+protects an Aave V3 lending position from liquidation on Base Sepolia.
+
+You have tools (via KeeperHub's MCP server) to:
+- list and execute KeeperHub workflows
+- call Aave V3 protocol actions directly (read account data, simulate and
+  execute repayments)
+
+Your job, every time you run:
+1. Read the current health factor for wallet ${config.position.walletAddress}
+   on chain ${config.position.chainId} (via execute_protocol_action,
+   actionType "aave-v3/get-user-account-data").
+2. If the health factor is at or above ${config.position.healthFactorThreshold},
+   report the position as healthy and take no further action.
+3. If it is below ${config.position.healthFactorThreshold}, compute a safe
+   repay amount that brings the health factor back above
+   ${config.position.healthFactorThreshold} with a small margin, using the
+   totalDebtBase, totalCollateralBase, and liquidation threshold from the
+   account data. Do not just repay a fixed guessed amount.
+4. Before executing any write action, call it once with "simulate": true and
+   confirm it would not revert.
+5. Only then execute the real repay via execute_protocol_action
+   (actionType "aave-v3/repay") or by triggering the guardian workflow
+   (workflowId "${config.position.workflowId}"), whichever the available
+   tools support.
+6. Poll for completion and report the final transaction hash/link.
+
+Always end with a short, clear final summary of what you found and what (if
+anything) you did, including the health factor before/after and any
+transaction link.`;
 
 async function runOnce(): Promise<void> {
+  if (!config.position.workflowId) {
+    console.error(
+      "GUARDIAN_WORKFLOW_ID is not set. Run `npm run setup:workflow` first, " +
+        "or add it to .env manually."
+    );
+    return;
+  }
+
   const mcp = createKeeperHubClient();
-  
+
   try {
     await mcp.connect();
   } catch (error) {
     console.error("Failed to connect to KeeperHub MCP:", error);
-    if (error instanceof Error && error.message.includes('ENOTFOUND')) {
+    if (error instanceof Error && error.message.includes("ENOTFOUND")) {
       console.error("DNS resolution failed. This is a temporary network issue. Will retry in next cycle.");
     }
     return;
@@ -20,82 +58,23 @@ async function runOnce(): Promise<void> {
   console.log(`\n[${new Date().toISOString()}] Guardian run starting...`);
   console.log(`Checking wallet: ${config.position.walletAddress}`);
   console.log(`Chain ID: ${config.position.chainId}`);
-  console.log(`Health factor threshold: ${config.position.healthFactorThreshold}`);
 
   try {
-    // Step 1: Get current health factor using execute_protocol_action
-    console.log("Fetching current health factor...");
-    const healthDataResult = await mcp.callTool("execute_protocol_action", {
-      actionType: "aave-v3/get-user-account-data",
-      params: {
-        network: config.position.chainId,
-        user: config.position.walletAddress,
-      },
-    });
+    const tools = await mcp.listGeminiTools();
+    const userPrompt = "Run a guardian check now and act if needed.";
 
-    const healthData = JSON.parse(healthDataResult);
-    console.log("Raw health data response:", JSON.stringify(healthData, null, 2));
-    
-    if (!healthData.result || !healthData.result.healthFactor) {
-      throw new Error("healthFactor not found in response");
-    }
-    
-    const rawHealthFactor = BigInt(healthData.result.healthFactor);
-    const actualHealthFactor = Number(rawHealthFactor) / 1e18;
+    const result = await runAgent(SYSTEM_PROMPT, userPrompt, mcp, tools);
 
-    console.log(`Raw health factor: ${rawHealthFactor.toString()}`);
-    console.log(`Actual health factor: ${actualHealthFactor.toFixed(4)}`);
-    console.log(`Threshold: ${config.position.healthFactorThreshold}`);
-
-    // Step 2: Check if at risk
-    if (actualHealthFactor >= config.position.healthFactorThreshold) {
-      const message = `Position is healthy. Current health factor: ${actualHealthFactor.toFixed(4)} (threshold: ${config.position.healthFactorThreshold}). No action needed.`;
-      console.log(message);
-      await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${message}`);
-      await mcp.disconnect();
-      return;
+    for (const step of result.transcript) {
+      const icon = { thought: "🤔 THOUGHT", tool_call: "🔧 CALL", tool_result: "📄 RESULT", final: "✅ FINAL" }[step.type];
+      console.log(`${icon}   ${step.text}`);
     }
 
-    // Step 3: Position is at risk - calculate repay amount
-    const repayAmount = calculateRepayAmount(healthData, config.position.healthFactorThreshold);
-    console.log(`Calculated repay amount: ${repayAmount} wei (${(Number(repayAmount) / 1e6).toFixed(6)} USDT)`);
-
-    const warningMessage = `⚠️ POSITION AT RISK! Health factor ${actualHealthFactor.toFixed(4)} is below threshold ${config.position.healthFactorThreshold}. Executing USDT repay action with amount: ${repayAmount}...`;
-    console.log(warningMessage);
-    await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${warningMessage}`);
-
-    // Execute the repay action directly from your wallet
-    console.log("Executing repay action directly from your wallet...");
-    const repayResult = await executeDirectRepay(
-      repayAmount,
-      config.position.walletAddress,
-      "2" // Variable rate mode (borrowed in variable mode from setup script)
-    );
-
-    console.log("Repay execution result:", repayResult);
-    
-    // Check if the action was successful
-    if (!repayResult.success) {
-      const errorMessage = `❌ Repay action failed: ${repayResult.error || 'Unknown error'}`;
-      console.error(errorMessage);
-      await notifyLocal(`**Position Guardian run failed** (${new Date().toISOString()})\n${errorMessage}`);
-      await mcp.disconnect();
-      return;
-    }
-    
-    // Create transaction link
-    const transactionLink = repayResult.transactionHash 
-      ? `https://sepolia.basescan.org/tx/${repayResult.transactionHash}`
-      : "Transaction link not available";
-
-    const successMessage = `✅ Repay executed successfully!\nTransaction: ${transactionLink}\nHealth factor was ${actualHealthFactor.toFixed(4)} (below threshold ${config.position.healthFactorThreshold})`;
-    console.log(successMessage);
-    await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${successMessage}`);
-
+    console.log(`\n=== SUMMARY ===\n${result.finalText}\n`);
+    await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${result.finalText}`);
   } catch (error) {
-    const errorMessage = `Guardian execution failed: ${error instanceof Error ? error.message : String(error)}`;
-    console.error(errorMessage);
-    await notifyLocal(`**Position Guardian run failed** (${new Date().toISOString()})\n${errorMessage}`);
+    console.error("Guardian run failed:", error);
+    await notifyLocal(`**Position Guardian run failed** (${new Date().toISOString()})\nError: ${error}`);
   } finally {
     await mcp.disconnect();
   }

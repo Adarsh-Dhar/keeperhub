@@ -105,8 +105,8 @@ export function buildGuardianWorkflowNodes() {
         config: {
           actionType: "aave-v3/repay",
           network: config.position.chainId,
-          asset: "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", // User's specific USDT contract (already checksummed)
-          amount: "5000000", // 5 USDT (6 decimals) - matches calculateRepayAmount
+          asset: "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", // Base Sepolia Aave V3 USDT underlying (verified against aave-address-book)
+          amount: "{{@agent-computed-amount}}", // filled in by the agent at call time — see runGuardian.ts system prompt
           onBehalfOf: config.position.walletAddress,
         },
         status: "idle",
