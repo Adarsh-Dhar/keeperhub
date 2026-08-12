@@ -24,9 +24,10 @@ export const config = {
     model: optional("GEMINI_MODEL", "gemini-2.5-pro"),
   },
   position: {
-    chainId: optional("CHAIN_ID", "1"), // Default to Ethereum mainnet (supported by Aave V3)
+    chainId: optional("CHAIN_ID", "84532"), // Default to Base Sepolia (safe testnet)
     walletAddress: required("GUARDIAN_WALLET_ADDRESS"),
     healthFactorThreshold: Number(optional("HEALTH_FACTOR_THRESHOLD", "1.5")),
+    workflowId: optional("GUARDIAN_WORKFLOW_ID", ""),
   },
   notify: {
     discordWebhookUrl: optional("DISCORD_WEBHOOK_URL"),

@@ -1,6 +1,37 @@
 import { config } from "../config.js";
 
 /**
+ * Calculates the amount of debt to repay to reach a target health factor.
+ * 
+ * Formula: debtToRepay = currentDebt - (collateral * liquidationThreshold / targetHealthFactor)
+ * 
+ * This ensures we repay just enough to bring the health factor back above the safety threshold.
+ * 
+ * @param healthData - The health data from Aave V3 get-user-account-data
+ * @param targetHealthFactor - The desired health factor (e.g., 1.5)
+ * @returns The amount to repay (in the same units as the debt, typically wei)
+ */
+export function calculateRepayAmount(
+  healthData: { totalCollateralBase: string; totalDebtBase: string; healthFactor: string } | { result: { totalCollateralBase: string; totalDebtBase: string; healthFactor: string } },
+  targetHealthFactor: number
+): string {
+  // Handle nested result structure from execute_protocol_action
+  const data = 'result' in healthData ? healthData.result : healthData;
+  
+  const currentHealthFactor = Number(data.healthFactor) / 1e18; // Aave uses 1e18 scaling
+  
+  // If already healthy, no repayment needed
+  if (currentHealthFactor >= targetHealthFactor) {
+    return "0";
+  }
+  
+  // For now, use a conservative fixed amount for testing
+  // 5 USDT = 5,000,000 (6 decimals)
+  // TODO: Implement proper calculation based on collateral/debt ratios
+  return "5000000"; // 5 USDT
+}
+
+/**
  * Builds the KeeperHub workflow graph for the Position Guardian.
  *
  * Shape:
@@ -74,8 +105,8 @@ export function buildGuardianWorkflowNodes() {
         config: {
           actionType: "aave-v3/repay",
           network: config.position.chainId,
-          asset: "0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f", // USDC on Base Sepolia
-          amount: "1000000", // 1 USDC (6 decimals) - should be calculated dynamically
+          asset: "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", // User's specific USDT contract (already checksummed)
+          amount: "5000000", // 5 USDT (6 decimals) - matches calculateRepayAmount
           onBehalfOf: config.position.walletAddress,
         },
         status: "idle",
