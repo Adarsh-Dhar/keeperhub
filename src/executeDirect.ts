@@ -1,3 +1,6 @@
+// NOTE: no longer called by runGuardian.ts as of the KeeperHub-routed repay
+// change — kept here as a manual fallback only. See execute_protocol_action
+// calls in runGuardian.ts for the live execution path.
 import { createWalletClient, createPublicClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';

@@ -56,7 +56,7 @@ export async function runAgent(
       },
     });
 
-    const responseText = response.response?.text?.() || "";
+    const responseText = response.text || "";
     
     // Extract function calls from the response
     const functionCalls: any[] = [];
