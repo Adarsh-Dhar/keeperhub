@@ -3,9 +3,7 @@ import { createKeeperHubClient, KeeperHubMCP } from "./mcp/keeperhubClient.js";
 import { notifyLocal } from "./notify/logger.js";
 import { calculateRepayAmount, calculateSupplyAmount } from "./workflows/workflowDefinition.js";
 import { decideRepayVsSupply, DecisionContext } from "./agent/decisionAgent.js";
-import { createWalletClient, createPublicClient, http, checksumAddress } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { baseSepolia } from "viem/chains";
+import { checksumAddress } from "viem";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { getDebtAssetBalance, getCollateralAssetBalance } from "./onchain/balances.js";
@@ -53,255 +51,6 @@ function resetSessionCount(): void {
   sessionExecutionCount = 0;
 }
 
-const ERC20_ABI = [
-  {
-    inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
-    name: "approve",
-    outputs: [{ type: "bool" }],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }],
-    name: "allowance",
-    outputs: [{ type: "uint256" }],
-    stateMutability: "view",
-    type: "function",
-  },
-] as const;
-
-const AAVE_POOL_ABI = [
-  {
-    inputs: [
-      { name: "asset", type: "address" },
-      { name: "amount", type: "uint256" },
-      { name: "interestRateMode", type: "uint256" },
-      { name: "onBehalfOf", type: "address" },
-    ],
-    name: "repay",
-    outputs: [{ type: "uint256" }],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      { name: "asset", type: "address" },
-      { name: "amount", type: "uint256" },
-      { name: "onBehalfOf", type: "address" },
-      { name: "referralCode", type: "uint16" },
-    ],
-    name: "supply",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-] as const;
-
-const AAVE_POOL_ADDRESS = checksumAddress(config.contracts.aavePool as `0x${string}`);
-
-async function approveTokenIfNeeded(tokenAddress: string, amount: bigint): Promise<boolean> {
-  const privateKey = process.env.PRIVATE_KEY;
-  if (!privateKey) {
-    console.error("PRIVATE_KEY not set in environment, cannot auto-approve");
-    return false;
-  }
-
-  try {
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const walletClient = createWalletClient({
-      account,
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    const publicClient = createPublicClient({
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    // Use checksummed addresses
-    const actualTokenAddress = checksumAddress(tokenAddress as `0x${string}`);
-    const checksummedPool = checksumAddress(AAVE_POOL_ADDRESS);
-
-    // Check current allowance - retry once before giving up
-    let currentAllowance = BigInt(0);
-    let allowanceReadOk = false;
-    for (let attempt = 0; attempt < 2 && !allowanceReadOk; attempt++) {
-      try {
-        currentAllowance = await publicClient.readContract({
-          address: actualTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "allowance",
-          args: [account.address, checksummedPool],
-        }) as bigint;
-        allowanceReadOk = true;
-      } catch (error) {
-        if (attempt === 0) {
-          console.log("⚠️ Allowance read failed, retrying once...");
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-    }
-
-    if (!allowanceReadOk) {
-      console.error("✗ Cannot verify token allowance after retry — refusing to proceed without confirming approval.");
-      return false;
-    }
-
-    if (currentAllowance >= amount) {
-      console.log(`✓ Sufficient allowance already exists: ${currentAllowance.toString()}`);
-      return true;
-    }
-
-    console.log(`Approving Aave pool to spend ${amount.toString()} of ${actualTokenAddress}...`);
-    const approveHash = await walletClient.writeContract({
-      address: actualTokenAddress,
-      abi: ERC20_ABI,
-      functionName: "approve",
-      args: [checksummedPool, amount],
-    });
-
-    console.log(`✓ Approval transaction sent: ${approveHash}`);
-    await publicClient.waitForTransactionReceipt({ hash: approveHash });
-    console.log("✓ Approval confirmed");
-
-    return true;
-  } catch (error) {
-    console.error("✗ Auto-approval failed:", error instanceof Error ? error.message : String(error));
-    return false;
-  }
-}
-
-async function executeDirectRepay(
-  asset: string,
-  amount: string,
-  onBehalfOf: string
-): Promise<WriteActionResult> {
-  const privateKey = process.env.PRIVATE_KEY;
-  if (!privateKey) {
-    return { success: false, error: "PRIVATE_KEY not set in environment" };
-  }
-
-  try {
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const walletClient = createWalletClient({
-      account,
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    const publicClient = createPublicClient({
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    // Use checksummed addresses
-    const actualAsset = checksumAddress(asset as `0x${string}`);
-    const checksummedOnBehalfOf = checksumAddress(onBehalfOf as `0x${string}`);
-
-    console.log(`Executing direct repay of ${amount} ${actualAsset} to Aave pool...`);
-
-    // First approve the pool to spend the debt asset
-    const approvalSuccess = await approveTokenIfNeeded(actualAsset, BigInt(amount));
-    if (!approvalSuccess) {
-      return { success: false, error: "Failed to approve token spending" };
-    }
-
-    const repayHash = await walletClient.writeContract({
-      address: AAVE_POOL_ADDRESS,
-      abi: AAVE_POOL_ABI,
-      functionName: "repay",
-      args: [actualAsset, BigInt(amount), 2n, checksummedOnBehalfOf],
-    });
-
-    console.log(`✓ Repay transaction sent: ${repayHash}`);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash: repayHash });
-    console.log("✓ Repay confirmed");
-
-    const transactionLink = `https://sepolia.basescan.org/tx/${repayHash}`;
-    return { success: true, transactionLink };
-  } catch (error) {
-    console.error("✗ Direct repay failed:", error instanceof Error ? error.message : String(error));
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-async function executeDirectSupply(
-  asset: string,
-  amount: string,
-  onBehalfOf: string
-): Promise<WriteActionResult> {
-  const privateKey = process.env.PRIVATE_KEY;
-  if (!privateKey) {
-    return { success: false, error: "PRIVATE_KEY not set in environment" };
-  }
-
-  try {
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const walletClient = createWalletClient({
-      account,
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    const publicClient = createPublicClient({
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    // Use checksummed addresses
-    const actualAsset = checksumAddress(asset as `0x${string}`);
-    const checksummedOnBehalfOf = checksumAddress(onBehalfOf as `0x${string}`);
-
-    console.log(`Executing direct supply of ${amount} ${actualAsset} to Aave pool...`);
-
-    // First approve the pool to spend the collateral asset
-    const approvalSuccess = await approveTokenIfNeeded(actualAsset, BigInt(amount));
-    if (!approvalSuccess) {
-      return { success: false, error: "Failed to approve token spending" };
-    }
-
-    const supplyHash = await walletClient.writeContract({
-      address: AAVE_POOL_ADDRESS,
-      abi: AAVE_POOL_ABI,
-      functionName: "supply",
-      args: [actualAsset, BigInt(amount), checksummedOnBehalfOf, 0],
-    });
-
-    console.log(`✓ Supply transaction sent: ${supplyHash}`);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash: supplyHash });
-    console.log("✓ Supply confirmed");
-
-    const transactionLink = `https://sepolia.basescan.org/tx/${supplyHash}`;
-    return { success: true, transactionLink };
-  } catch (error) {
-    console.error("✗ Direct supply failed:", error instanceof Error ? error.message : String(error));
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-/**
- * Fallback execution using direct contract calls with private key.
- * This bypasses KeeperHub's wallet limitation and uses the user's own wallet
- * where the Aave position actually exists.
- */
-async function executeProtocolWriteDirect(
-  actionType: string,
-  asset: string,
-  amount: string,
-  onBehalfOf: string
-): Promise<WriteActionResult> {
-  console.log(`Using direct execution for ${actionType} (bypassing KeeperHub wallet limitation)`);
-
-  if (actionType === "aave-v3/repay") {
-    return await executeDirectRepay(asset, amount, onBehalfOf);
-  } else if (actionType === "aave-v3/supply") {
-    return await executeDirectSupply(asset, amount, onBehalfOf);
-  }
-
-  return { success: false, error: `Direct execution not implemented for ${actionType}` };
-}
-
 interface WriteActionResult {
   success: boolean;
   transactionLink?: string;
@@ -343,31 +92,37 @@ async function executeProtocolWrite(
   const execResult = JSON.parse(execResultRaw);
   console.log("Execution submitted:", JSON.stringify(execResult, null, 2));
 
-  if (!execResult.executionId) {
-    return { success: false, error: `Execution did not return an executionId: ${execResultRaw}` };
+  // Handle both cases: async execution (with executionId) and immediate execution (with transactionHash)
+  if (execResult.executionId) {
+    console.log("Polling for execution status...");
+    let statusResult: any;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const statusRaw = await mcp.callTool("get_direct_execution_status", {
+        executionId: execResult.executionId,
+      });
+      statusResult = JSON.parse(statusRaw);
+      console.log(`Status check ${attempt + 1}:`, statusResult.status);
+      if (statusResult.status === "completed" || statusResult.status === "failed") break;
+    }
+
+    if (!statusResult || statusResult.status !== "completed") {
+      return { success: false, error: `Execution did not complete in time. Last status: ${JSON.stringify(statusResult)}` };
+    }
+
+    const transactionLink =
+      statusResult.transactionLink ||
+      (statusResult.transactionHash ? `https://sepolia.basescan.org/tx/${statusResult.transactionHash}` : undefined);
+
+    return { success: true, transactionLink };
+  } else if (execResult.success && execResult.transactionHash) {
+    // Execution completed immediately with transaction result
+    const transactionLink = execResult.transactionLink || `https://sepolia.basescan.org/tx/${execResult.transactionHash}`;
+    console.log(`Transaction completed immediately: ${transactionLink}`);
+    return { success: true, transactionLink };
+  } else {
+    return { success: false, error: `Execution did not return executionId or transactionHash: ${execResultRaw}` };
   }
-
-  console.log("Polling for execution status...");
-  let statusResult: any;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const statusRaw = await mcp.callTool("get_direct_execution_status", {
-      executionId: execResult.executionId,
-    });
-    statusResult = JSON.parse(statusRaw);
-    console.log(`Status check ${attempt + 1}:`, statusResult.status);
-    if (statusResult.status === "completed" || statusResult.status === "failed") break;
-  }
-
-  if (!statusResult || statusResult.status !== "completed") {
-    return { success: false, error: `Execution did not complete in time. Last status: ${JSON.stringify(statusResult)}` };
-  }
-
-  const transactionLink =
-    statusResult.transactionLink ||
-    (statusResult.transactionHash ? `https://sepolia.basescan.org/tx/${statusResult.transactionHash}` : undefined);
-
-  return { success: true, transactionLink };
 }
 
 async function runOnce(): Promise<void> {
@@ -560,8 +315,15 @@ async function runOnce(): Promise<void> {
 
     const finalActionType = action === "repay" ? "aave-v3/repay" : "aave-v3/supply";
 
-    // Use direct execution to avoid KeeperHub wallet limitation
-    const result = await executeProtocolWriteDirect(finalActionType, asset, amount, config.position.walletAddress);
+    // Try KeeperHub execution first (now that we've approved the tokens)
+    console.log(`Attempting KeeperHub execution of ${finalActionType}...`);
+    let result = await executeProtocolWrite(mcp, finalActionType, params);
+
+    // Fallback to direct wallet if KeeperHub fails (e.g., insufficient funds)
+    if (!result.success) {
+      console.log(`KeeperHub execution failed (${result.error}). Falling back to direct wallet execution...`);
+      result = await executeProtocolWriteDirect(finalActionType, asset, amount, config.position.walletAddress);
+    }
 
     if (result.success) {
       incrementExecutionCount(); // Track session executions
