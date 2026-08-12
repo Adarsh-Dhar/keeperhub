@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { createKeeperHubClient } from "./mcp/keeperhubClient.js";
 import { notifyLocal } from "./notify/logger.js";
 import { executeDirectRepay } from "./executeDirect.js";
+import { calculateRepayAmount } from "./workflows/workflowDefinition.js";
 
 async function runOnce(): Promise<void> {
   const mcp = createKeeperHubClient();
@@ -55,8 +56,8 @@ async function runOnce(): Promise<void> {
       return;
     }
 
-    // Step 3: Position is at risk - execute repay with fixed amount
-    const repayAmount = "5000000"; // 5 USDT (6 decimals)
+    // Step 3: Position is at risk - calculate repay amount dynamically
+    const repayAmount = calculateRepayAmount(healthData, config.position.healthFactorThreshold);
     console.log(`Calculated repay amount: ${repayAmount} wei (${(Number(repayAmount) / 1e6).toFixed(6)} USDT)`);
 
     const warningMessage = `⚠️ POSITION AT RISK! Health factor ${actualHealthFactor.toFixed(4)} is below threshold ${config.position.healthFactorThreshold}. Executing USDT repay action with amount: ${repayAmount}...`;

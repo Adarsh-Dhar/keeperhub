@@ -12,23 +12,44 @@ import { config } from "../config.js";
  * @returns The amount to repay (in the same units as the debt, typically wei)
  */
 export function calculateRepayAmount(
-  healthData: { totalCollateralBase: string; totalDebtBase: string; healthFactor: string } | { result: { totalCollateralBase: string; totalDebtBase: string; healthFactor: string } },
+  healthData:
+    | { totalCollateralBase: string; totalDebtBase: string; currentLiquidationThreshold: string; healthFactor: string }
+    | { result: { totalCollateralBase: string; totalDebtBase: string; currentLiquidationThreshold: string; healthFactor: string } },
   targetHealthFactor: number
 ): string {
-  // Handle nested result structure from execute_protocol_action
-  const data = 'result' in healthData ? healthData.result : healthData;
-  
-  const currentHealthFactor = Number(data.healthFactor) / 1e18; // Aave uses 1e18 scaling
-  
-  // If already healthy, no repayment needed
-  if (currentHealthFactor >= targetHealthFactor) {
-    return "0";
-  }
-  
-  // For now, use a conservative fixed amount for testing
-  // 5 USDT = 5,000,000 (6 decimals)
-  // TODO: Implement proper calculation based on collateral/debt ratios
-  return "5000000"; // 5 USDT
+  const data = "result" in healthData ? healthData.result : healthData;
+
+  const collateral = Number(data.totalCollateralBase);
+  const debt = Number(data.totalDebtBase);
+  const liqThreshold = Number(data.currentLiquidationThreshold) / 10000; // e.g. 8600 -> 0.86
+
+  const currentHealthFactor = Number(data.healthFactor) / 1e18;
+  if (currentHealthFactor >= targetHealthFactor) return "0";
+
+  // Repay a little past the line, not exactly to it, so the next interest
+  // accrual tick doesn't immediately push it back under threshold.
+  const BUFFER = 1.05; // land 5% above target
+  const effectiveTarget = targetHealthFactor * BUFFER;
+
+  const maxSafeDebtBase = (collateral * liqThreshold) / effectiveTarget;
+  const debtToRepayBase = debt - maxSafeDebtBase;
+
+  if (debtToRepayBase <= 0) return "0";
+
+  // totalDebtBase/totalCollateralBase are Aave's 8-decimal base-currency
+  // (oracle USD value) units, not the debt token's own decimals. This
+  // assumes the debt asset (USDT) is ~1:1 pegged to that base currency.
+  const BASE_CURRENCY_DECIMALS = 8;
+  const DEBT_TOKEN_DECIMALS = 6; // USDT
+  const decimalAdjustment = 10 ** (DEBT_TOKEN_DECIMALS - BASE_CURRENCY_DECIMALS);
+
+  let repayAmountTokenUnits = Math.ceil(debtToRepayBase * decimalAdjustment);
+
+  // Never try to repay more than the outstanding debt.
+  const totalDebtTokenUnitsApprox = Math.ceil(debt * decimalAdjustment);
+  repayAmountTokenUnits = Math.min(repayAmountTokenUnits, totalDebtTokenUnitsApprox);
+
+  return repayAmountTokenUnits.toString();
 }
 
 /**
@@ -106,7 +127,7 @@ export function buildGuardianWorkflowNodes() {
           actionType: "aave-v3/repay",
           network: config.position.chainId,
           asset: "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", // Base Sepolia Aave V3 USDT underlying (verified against aave-address-book)
-          amount: "{{@agent-computed-amount}}", // filled in by the agent at call time — see runGuardian.ts system prompt
+          amount: "0", // placeholder — actual amount is computed by calculateRepayAmount() in runGuardian.ts at run time; this static node value isn't used by the live guardian:once/watch path
           onBehalfOf: config.position.walletAddress,
         },
         status: "idle",
