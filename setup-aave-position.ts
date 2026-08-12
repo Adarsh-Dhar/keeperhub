@@ -19,7 +19,7 @@ async function runCommand(command: string, description: string): Promise<void> {
 }
 
 async function main() {
-  const rpcUrl = process.env.RPC_URL || "https://sepolia.base.org";
+  const rpcUrl = process.env.BASE_RPC_URL || "https://sepolia.base.org";
   const privateKey = process.env.PRIVATE_KEY;
   
   if (!privateKey) {

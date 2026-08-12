@@ -39,7 +39,7 @@ export const config = {
     walletCollateralAsset: optional("WALLET_COLLATERAL_ASSET_ADDRESS", "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f"), // Base Sepolia USDC (Aave underlying)
   },
   rpc: {
-    url: optional("RPC_URL", "https://sepolia.base.org"),
+    url: optional("BASE_RPC_URL", "https://sepolia.base.org"),
   },
   contracts: {
     // Aave V3 Pool address - required from .env

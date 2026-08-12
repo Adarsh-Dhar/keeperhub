@@ -25,7 +25,7 @@ const ERC20_ABI = [
 
 async function main() {
   const privateKey = process.env.PRIVATE_KEY;
-  const rpcUrl = process.env.RPC_URL || "https://sepolia.base.org";
+  const rpcUrl = process.env.BASE_RPC_URL || "https://sepolia.base.org";
   
   if (!privateKey) {
     throw new Error("PRIVATE_KEY not set in environment");

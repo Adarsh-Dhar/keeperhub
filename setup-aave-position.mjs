@@ -14,7 +14,7 @@
  * Env vars (put these in a .env and `node --env-file=.env setup-aave-position.mjs`,
  * or export them in your shell first):
  *   PRIVATE_KEY          - test wallet private key, 0x-prefixed (NEVER use a real-funds wallet)
- *   RPC_URL              - optional, defaults to a public Base Sepolia RPC
+ *   BASE_RPC_URL         - optional, defaults to a public Base Sepolia RPC
  *   MINT_USDC_AMOUNT     - optional, human units, defaults to "100"
  *   SUPPLY_USDC_AMOUNT   - optional, human units, defaults to "15"
  *   BORROW_DAI_AMOUNT    - optional, human units, defaults to "5"
@@ -38,7 +38,7 @@ import { baseSepolia } from "viem/chains";
 // Config
 // ---------------------------------------------------------------------------
 
-const RPC_URL = process.env.RPC_URL || "https://sepolia.base.org";
+const BASE_RPC_URL = process.env.BASE_RPC_URL || "https://sepolia.base.org";
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
 if (!PRIVATE_KEY) {
@@ -52,7 +52,8 @@ const FAUCET = "0xC959483DBa39aa9E78757139af0e9a2EDEb3f42D";
 
 // Reserve assets on the Base Sepolia market
 const USDC = { address: "0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f", decimals: 6, symbol: "USDC" };
-const DAI = { address: "0x61619E9316D414091Aa4f3D94b913C5c5e0b8aa2", decimals: 18, symbol: "DAI" };
+const DAI = { address: "0x61619E9316D414091Aa4f3D94b913C5c5e0b8aa2", decimals
+  : 18, symbol: "DAI" };
 
 const MINT_USDC_AMOUNT = process.env.MINT_USDC_AMOUNT || "100";
 const SUPPLY_USDC_AMOUNT = process.env.SUPPLY_USDC_AMOUNT || "15";
@@ -143,8 +144,8 @@ const VARIABLE_RATE_MODE = 2n; // Aave V3 stable-rate borrowing is deprecated ma
 
 const account = privateKeyToAccount(PRIVATE_KEY);
 
-const publicClient = createPublicClient({ chain: baseSepolia, transport: http(RPC_URL) });
-const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(RPC_URL) });
+const publicClient = createPublicClient({ chain: baseSepolia, transport: http(BASE_RPC_URL) });
+const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(BASE_RPC_URL) });
 
 const usdcContract = getContract({ address: USDC.address, abi: erc20Abi, client: walletClient });
 const daiContract = getContract({ address: DAI.address, abi: erc20Abi, client: { public: publicClient, wallet: walletClient } });
@@ -183,7 +184,7 @@ function fmtHealthFactor(raw) {
 
 async function main() {
   console.log(`Wallet: ${account.address}`);
-  console.log(`RPC:    ${RPC_URL}`);
+  console.log(`RPC:    ${BASE_RPC_URL}`);
 
   const ethBalance = await publicClient.getBalance({ address: account.address });
   console.log(`ETH balance: ${formatUnits(ethBalance, 18)} ETH`);
