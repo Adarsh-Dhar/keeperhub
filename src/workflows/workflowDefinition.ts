@@ -53,6 +53,55 @@ export function calculateRepayAmount(
 }
 
 /**
+ * Calculates the amount of additional collateral to supply to reach a target
+ * health factor, as an alternative to repaying debt.
+ *
+ * Formula: requiredCollateral = (debt * targetHealthFactor) / liquidationThreshold
+ *          amountToSupply = requiredCollateral - currentCollateral
+ *
+ * Mirrors calculateRepayAmount() but solves for collateral instead of debt.
+ *
+ * @param healthData - The health data from Aave V3 get-user-account-data
+ * @param targetHealthFactor - The desired health factor (e.g., 1.5)
+ * @returns The amount of collateral asset to supply (token units, e.g. USDC 6 decimals)
+ */
+export function calculateSupplyAmount(
+  healthData:
+    | { totalCollateralBase: string; totalDebtBase: string; currentLiquidationThreshold: string; healthFactor: string }
+    | { result: { totalCollateralBase: string; totalDebtBase: string; currentLiquidationThreshold: string; healthFactor: string } },
+  targetHealthFactor: number
+): string {
+  const data = "result" in healthData ? healthData.result : healthData;
+
+  const collateral = Number(data.totalCollateralBase);
+  const debt = Number(data.totalDebtBase);
+  const liqThreshold = Number(data.currentLiquidationThreshold) / 10000; // e.g. 8600 -> 0.86
+
+  const currentHealthFactor = Number(data.healthFactor) / 1e18;
+  if (currentHealthFactor >= targetHealthFactor) return "0";
+
+  // Same buffer rationale as calculateRepayAmount — land a little past the
+  // line, not exactly on it.
+  const BUFFER = 1.05;
+  const effectiveTarget = targetHealthFactor * BUFFER;
+
+  const requiredCollateralBase = (debt * effectiveTarget) / liqThreshold;
+  const collateralToSupplyBase = requiredCollateralBase - collateral;
+
+  if (collateralToSupplyBase <= 0) return "0";
+
+  // Same 8-decimal base-currency -> 6-decimal token unit conversion as
+  // calculateRepayAmount, assuming the collateral asset (USDC) is ~1:1
+  // pegged to the oracle base currency.
+  const BASE_CURRENCY_DECIMALS = 8;
+  const COLLATERAL_TOKEN_DECIMALS = 6; // USDC
+  const decimalAdjustment = 10 ** (COLLATERAL_TOKEN_DECIMALS - BASE_CURRENCY_DECIMALS);
+
+  const supplyAmountTokenUnits = Math.ceil(collateralToSupplyBase * decimalAdjustment);
+  return supplyAmountTokenUnits.toString();
+}
+
+/**
  * Builds the KeeperHub workflow graph for the Position Guardian.
  *
  * Shape:

@@ -56,14 +56,17 @@ export async function runAgent(
       },
     });
 
-    const responseText = response.text || "";
-    
-    // Extract function calls from the response
+    // Extract text and function calls from the response parts directly —
+    // avoids calling response.text, which logs a console warning whenever
+    // a functionCall part is also present.
     const functionCalls: any[] = [];
+    let responseText = "";
     const parts = response.candidates?.[0]?.content?.parts || [];
     for (const part of parts) {
       if (part.functionCall) {
         functionCalls.push(part.functionCall);
+      } else if (part.text) {
+        responseText += part.text;
       }
     }
 

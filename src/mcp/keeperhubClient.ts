@@ -99,7 +99,14 @@ export class KeeperHubMCP {
 
   /** Call a single KeeperHub MCP tool by name and return its raw text content. */
   async callTool(name: string, args: Record<string, unknown>): Promise<string> {
-    const result = await this.client.callTool({ name, arguments: args });
+    let result;
+    try {
+      result = await this.client.callTool({ name, arguments: args });
+    } catch (err) {
+      // one retry for transient network errors (e.g. "fetch failed")
+      await new Promise((r) => setTimeout(r, 1000));
+      result = await this.client.callTool({ name, arguments: args });
+    }
     const content = result.content as Array<{ type: string; text?: string }>;
     const text = content
       .filter((c) => c.type === "text" && typeof c.text === "string")

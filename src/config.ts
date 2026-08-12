@@ -29,6 +29,15 @@ export const config = {
     healthFactorThreshold: Number(optional("HEALTH_FACTOR_THRESHOLD", "1.5")),
     workflowId: optional("GUARDIAN_WORKFLOW_ID", ""),
   },
+  assets: {
+    // Base Sepolia Aave V3 USDT underlying — the debt asset for this position
+    debtAsset: optional("DEBT_ASSET_ADDRESS", "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a"),
+    // Base Sepolia USDC — the collateral asset supplied by setup-aave-position
+    collateralAsset: optional("USDC", "0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f"),
+  },
+  rpc: {
+    url: optional("RPC_URL", "https://sepolia.base.org"),
+  },
   notify: {
     discordWebhookUrl: optional("DISCORD_WEBHOOK_URL"),
   },
