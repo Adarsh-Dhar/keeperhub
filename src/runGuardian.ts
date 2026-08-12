@@ -3,9 +3,7 @@ import { createKeeperHubClient, KeeperHubMCP } from "./mcp/keeperhubClient.js";
 import { notifyLocal } from "./notify/logger.js";
 import { calculateRepayAmount, calculateSupplyAmount } from "./workflows/workflowDefinition.js";
 import { decideRepayVsSupply, DecisionContext } from "./agent/decisionAgent.js";
-import { createWalletClient, createPublicClient, http, checksumAddress } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { baseSepolia } from "viem/chains";
+import { checksumAddress } from "viem";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { getDebtAssetBalance, getCollateralAssetBalance } from "./onchain/balances.js";
@@ -51,236 +49,6 @@ function hasHealthFactorImproved(current: number): boolean {
 }
 function resetSessionCount(): void {
   sessionExecutionCount = 0;
-}
-
-const ERC20_ABI = [
-  {
-    inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
-    name: "approve",
-    outputs: [{ type: "bool" }],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }],
-    name: "allowance",
-    outputs: [{ type: "uint256" }],
-    stateMutability: "view",
-    type: "function",
-  },
-] as const;
-
-const AAVE_POOL_ABI = [
-  {
-    inputs: [
-      { name: "asset", type: "address" },
-      { name: "amount", type: "uint256" },
-      { name: "interestRateMode", type: "uint256" },
-      { name: "onBehalfOf", type: "address" },
-    ],
-    name: "repay",
-    outputs: [{ type: "uint256" }],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      { name: "asset", type: "address" },
-      { name: "amount", type: "uint256" },
-      { name: "onBehalfOf", type: "address" },
-      { name: "referralCode", type: "uint16" },
-    ],
-    name: "supply",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-] as const;
-
-const AAVE_POOL_ADDRESS = checksumAddress(config.contracts.aavePool as `0x${string}`);
-
-async function approveTokenIfNeeded(tokenAddress: string, amount: bigint): Promise<boolean> {
-  const privateKey = process.env.PRIVATE_KEY;
-  if (!privateKey) {
-    console.error("PRIVATE_KEY not set in environment, cannot auto-approve");
-    return false;
-  }
-
-  try {
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const walletClient = createWalletClient({
-      account,
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    const publicClient = createPublicClient({
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    // Use checksummed addresses
-    const actualTokenAddress = checksumAddress(tokenAddress as `0x${string}`);
-    const checksummedPool = checksumAddress(AAVE_POOL_ADDRESS);
-
-    // Check current allowance - skip if contract doesn't respond
-    let currentAllowance = BigInt(0);
-    try {
-      currentAllowance = await publicClient.readContract({
-        address: actualTokenAddress,
-        abi: ERC20_ABI,
-        functionName: "allowance",
-        args: [account.address, checksummedPool],
-      }) as bigint;
-    } catch (error) {
-      console.log("⚠️ Cannot check allowance (contract not responding), assuming approval exists");
-      return true; // Assume approval exists if we can't check
-    }
-
-    if (currentAllowance >= amount) {
-      console.log(`✓ Sufficient allowance already exists: ${currentAllowance.toString()}`);
-      return true;
-    }
-
-    console.log(`Approving Aave pool to spend ${amount.toString()} of ${actualTokenAddress}...`);
-    const approveHash = await walletClient.writeContract({
-      address: actualTokenAddress,
-      abi: ERC20_ABI,
-      functionName: "approve",
-      args: [checksummedPool, amount],
-    });
-
-    console.log(`✓ Approval transaction sent: ${approveHash}`);
-    await publicClient.waitForTransactionReceipt({ hash: approveHash });
-    console.log("✓ Approval confirmed");
-
-    return true;
-  } catch (error) {
-    console.error("✗ Auto-approval failed:", error instanceof Error ? error.message : String(error));
-    return false;
-  }
-}
-
-async function executeDirectRepay(
-  asset: string,
-  amount: string,
-  onBehalfOf: string
-): Promise<WriteActionResult> {
-  const privateKey = process.env.PRIVATE_KEY;
-  if (!privateKey) {
-    return { success: false, error: "PRIVATE_KEY not set in environment" };
-  }
-
-  try {
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const walletClient = createWalletClient({
-      account,
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    const publicClient = createPublicClient({
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    // Use checksummed addresses
-    const actualAsset = checksumAddress(asset as `0x${string}`);
-    const checksummedOnBehalfOf = checksumAddress(onBehalfOf as `0x${string}`);
-
-    console.log(`Executing direct repay of ${amount} ${actualAsset} to Aave pool...`);
-    
-    // First approve the pool to spend the debt asset
-    const approvalSuccess = await approveTokenIfNeeded(actualAsset, BigInt(amount));
-    if (!approvalSuccess) {
-      return { success: false, error: "Failed to approve token spending" };
-    }
-    
-    const repayHash = await walletClient.writeContract({
-      address: AAVE_POOL_ADDRESS,
-      abi: AAVE_POOL_ABI,
-      functionName: "repay",
-      args: [actualAsset, BigInt(amount), 2n, checksummedOnBehalfOf],
-    });
-
-    console.log(`✓ Repay transaction sent: ${repayHash}`);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash: repayHash });
-    console.log("✓ Repay confirmed");
-
-    const transactionLink = `https://sepolia.basescan.org/tx/${repayHash}`;
-    return { success: true, transactionLink };
-  } catch (error) {
-    console.error("✗ Direct repay failed:", error instanceof Error ? error.message : String(error));
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-async function executeDirectSupply(
-  asset: string,
-  amount: string,
-  onBehalfOf: string
-): Promise<WriteActionResult> {
-  const privateKey = process.env.PRIVATE_KEY;
-  if (!privateKey) {
-    return { success: false, error: "PRIVATE_KEY not set in environment" };
-  }
-
-  try {
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const walletClient = createWalletClient({
-      account,
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    const publicClient = createPublicClient({
-      chain: baseSepolia,
-      transport: http(config.rpc.url),
-    });
-
-    // Use checksummed addresses
-    const actualAsset = checksumAddress(asset as `0x${string}`);
-    const checksummedOnBehalfOf = checksumAddress(onBehalfOf as `0x${string}`);
-
-    console.log(`Executing direct supply of ${amount} ${actualAsset} to Aave pool...`);
-    
-    // First approve the pool to spend the collateral asset
-    const approvalSuccess = await approveTokenIfNeeded(actualAsset, BigInt(amount));
-    if (!approvalSuccess) {
-      return { success: false, error: "Failed to approve token spending" };
-    }
-    
-    const supplyHash = await walletClient.writeContract({
-      address: AAVE_POOL_ADDRESS,
-      abi: AAVE_POOL_ABI,
-      functionName: "supply",
-      args: [actualAsset, BigInt(amount), checksummedOnBehalfOf, 0],
-    });
-
-    console.log(`✓ Supply transaction sent: ${supplyHash}`);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash: supplyHash });
-    console.log("✓ Supply confirmed");
-
-    const transactionLink = `https://sepolia.basescan.org/tx/${supplyHash}`;
-    return { success: true, transactionLink };
-  } catch (error) {
-    console.error("✗ Direct supply failed:", error instanceof Error ? error.message : String(error));
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-async function executeDirectAction(
-  actionType: string,
-  asset: string,
-  amount: string,
-  onBehalfOf: string
-): Promise<WriteActionResult> {
-  if (actionType === "aave-v3/repay") {
-    return await executeDirectRepay(asset, amount, onBehalfOf);
-  } else if (actionType === "aave-v3/supply") {
-    return await executeDirectSupply(asset, amount, onBehalfOf);
-  }
-  return { success: false, error: "Direct execution only implemented for repay and supply" };
 }
 
 interface WriteActionResult {
@@ -349,28 +117,6 @@ async function executeProtocolWrite(
     (statusResult.transactionHash ? `https://sepolia.basescan.org/tx/${statusResult.transactionHash}` : undefined);
 
   return { success: true, transactionLink };
-}
-
-/**
- * Fallback execution using direct contract calls with private key.
- * This bypasses KeeperHub's wallet limitation and uses the user's own wallet
- * where the Aave position actually exists.
- */
-async function executeProtocolWriteDirect(
-  actionType: string,
-  asset: string,
-  amount: string,
-  onBehalfOf: string
-): Promise<WriteActionResult> {
-  console.log(`Using direct execution for ${actionType} (bypassing KeeperHub wallet limitation)`);
-  
-  if (actionType === "aave-v3/repay") {
-    return await executeDirectRepay(asset, amount, onBehalfOf);
-  } else if (actionType === "aave-v3/supply") {
-    return await executeDirectSupply(asset, amount, onBehalfOf);
-  }
-  
-  return { success: false, error: `Direct execution not implemented for ${actionType}` };
 }
 
 async function runOnce(): Promise<void> {
@@ -458,11 +204,58 @@ async function runOnce(): Promise<void> {
     console.log(`Required supply amount: ${requiredSupplyAmount} USDC`);
 
     // --- Step 4: route to a decision ---
-    // Skip balance checks due to Base Sepolia contract read issues
-    // Default to supply strategy for Aave V3 (safer to add collateral)
-    const action: "repay" | "supply" = "supply";
-    const decisionReasoning = "Using supply strategy to add collateral and improve health factor.";
-    console.log(decisionReasoning);
+    console.log("\nChecking wallet balances for repay vs supply...");
+    const [debtAssetBalanceRaw, collateralAssetBalanceRaw] = await Promise.all([
+      getDebtAssetBalance(config.position.walletAddress),
+      getCollateralAssetBalance(config.position.walletAddress),
+    ]);
+    console.log(`Debt asset (USDT) balance: ${debtAssetBalanceRaw.toString()}`);
+    console.log(`Collateral asset (USDC) balance: ${collateralAssetBalanceRaw.toString()}`);
+
+    const TOKEN_DECIMALS = 1e6; // USDT/USDC, 6 decimals
+    const canRepay = debtAssetBalanceRaw >= BigInt(requiredRepayAmount);
+    const canSupply = collateralAssetBalanceRaw >= BigInt(requiredSupplyAmount);
+
+    let action: "repay" | "supply";
+    let decisionReasoning: string;
+
+    if (!canRepay && !canSupply) {
+      // Neither action is actually affordable — executing anyway would just
+      // burn a simulation/revert cycle. Escalate instead of guessing.
+      const message =
+        `🛑 Neither repay nor supply is affordable right now. ` +
+        `Debt asset balance: ${(Number(debtAssetBalanceRaw) / TOKEN_DECIMALS).toFixed(2)} USDT (need ${(Number(requiredRepayAmount) / TOKEN_DECIMALS).toFixed(2)}). ` +
+        `Collateral asset balance: ${(Number(collateralAssetBalanceRaw) / TOKEN_DECIMALS).toFixed(2)} USDC (need ${(Number(requiredSupplyAmount) / TOKEN_DECIMALS).toFixed(2)}). ` +
+        `Escalating — no automated action can be taken.`;
+      console.error(message);
+      await notifyLocal(message);
+      await mcp.disconnect();
+      return;
+    } else if (canRepay && !canSupply) {
+      action = "repay";
+      decisionReasoning = "Only repay is affordable given current wallet balances.";
+    } else if (!canRepay && canSupply) {
+      action = "supply";
+      decisionReasoning = "Only supply is affordable given current wallet balances.";
+    } else {
+      // Both are affordable — this is the real judgment call, so ask the
+      // agent to weigh the tradeoff instead of defaulting silently.
+      const decisionContext: DecisionContext = {
+        healthFactor: actualHealthFactor,
+        threshold: config.position.healthFactorThreshold,
+        totalCollateralBase: d.totalCollateralBase,
+        totalDebtBase: d.totalDebtBase,
+        liquidationThresholdPct: Number(d.currentLiquidationThreshold) / 100,
+        debtAssetBalance: (Number(debtAssetBalanceRaw) / TOKEN_DECIMALS).toFixed(2),
+        collateralAssetBalance: (Number(collateralAssetBalanceRaw) / TOKEN_DECIMALS).toFixed(2),
+        requiredRepayAmount: (Number(requiredRepayAmount) / TOKEN_DECIMALS).toFixed(2),
+        requiredSupplyAmount: (Number(requiredSupplyAmount) / TOKEN_DECIMALS).toFixed(2),
+      };
+      const decision = await decideRepayVsSupply(decisionContext);
+      action = decision.action;
+      decisionReasoning = decision.reasoning;
+    }
+    console.log(`Decision: ${action}. ${decisionReasoning}`);
 
     // --- Step 5: act ---
     // Check cooldown before executing
@@ -486,17 +279,11 @@ async function runOnce(): Promise<void> {
 
     const amount = action === "repay" ? requiredRepayAmount : requiredSupplyAmount;
     const assetName = action === "repay" ? "USDT" : "USDC";
-    
-    // Skip balance checking due to contract read issues on Base Sepolia
-    // Rely on simulation to catch actual balance issues
-    console.log(`⚠️ Skipping balance check due to Base Sepolia contract read issues.`);
-    console.log(`⚠️ Relying on KeeperHub simulation to validate actual token availability.`);
-    
+
     const warningMessage =
       `⚠️ POSITION AT RISK! Health factor ${actualHealthFactor.toFixed(4)} is below threshold ${config.position.healthFactorThreshold}. ` +
       `Executing ${action} of ${amount} ${assetName}...\n` +
-      `Reasoning: ${decisionReasoning}\n` +
-      `⚠️ Note: Balance check skipped - simulation will catch any actual balance issues.`;
+      `Reasoning: ${decisionReasoning}`;
     console.log(warningMessage);
     await notifyLocal(warningMessage);
 
