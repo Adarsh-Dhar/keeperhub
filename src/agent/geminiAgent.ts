@@ -85,7 +85,11 @@ export async function runAgent(
             if (healthMatch) {
               const healthFactor = Number(healthMatch[1]) / 1e18;
               const threshold = 1.5; // fallback threshold
-              finalText = `Position health check complete. Health factor: ${healthFactor.toFixed(4)}. Position is healthy (above threshold ${threshold}). No action required.`;
+              if (healthFactor >= threshold) {
+                finalText = `Position health check complete. Health factor: ${healthFactor.toFixed(4)}. Position is healthy (above threshold ${threshold}). No action required.`;
+              } else {
+                finalText = `⚠️ POSITION AT RISK! Health factor: ${healthFactor.toFixed(4)} is below threshold ${threshold}. Agent should execute repay action but may have failed to do so.`;
+              }
             }
           } catch (e) {
             finalText = "Position health check complete. No action required.";

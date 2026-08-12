@@ -1,27 +1,9 @@
 import { config } from "./config.js";
 import { createKeeperHubClient } from "./mcp/keeperhubClient.js";
 import { notifyLocal } from "./notify/logger.js";
-import { runAgent } from "./agent/geminiAgent.js";
-
-const SYSTEM_PROMPT = `You are the Position Guardian. Check wallet ${config.position.walletAddress} on chain ${config.position.chainId}.
-
-STEP 1: Call execute_protocol_action with actionType "aave-v3/get-user-account-data", params: {"user": "${config.position.walletAddress}", "network": ${config.position.chainId}}
-
-STEP 2: Check the healthFactor from the result. If healthFactor >= ${config.position.healthFactorThreshold}, report "Position is healthy" and STOP. Do not call any other tools.
-
-STEP 3: Only if healthFactor < ${config.position.healthFactorThreshold}, call execute_protocol_action with actionType "aave-v3/repay", params: {"asset": "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", "amount": "5000000", "network": ${config.position.chainId}, "onBehalfOf": "${config.position.walletAddress}", "interestRateMode": "2"}
-
-DO NOT call list_workflows, search_protocol_actions, or any other tools. Only use execute_protocol_action.`;
+import { executeDirectRepay } from "./executeDirect.js";
 
 async function runOnce(): Promise<void> {
-  if (!config.position.workflowId) {
-    console.error(
-      "GUARDIAN_WORKFLOW_ID is not set. Run `npm run setup:workflow` first, " +
-        "or add it to .env manually."
-    );
-    return;
-  }
-
   const mcp = createKeeperHubClient();
 
   try {
@@ -37,23 +19,82 @@ async function runOnce(): Promise<void> {
   console.log(`\n[${new Date().toISOString()}] Guardian run starting...`);
   console.log(`Checking wallet: ${config.position.walletAddress}`);
   console.log(`Chain ID: ${config.position.chainId}`);
+  console.log(`Health factor threshold: ${config.position.healthFactorThreshold}`);
 
   try {
-    const tools = await mcp.listGeminiTools();
-    const userPrompt = "Run a guardian check now and act if needed.";
+    // Step 1: Get current health factor using execute_protocol_action
+    console.log("Fetching current health factor...");
+    const healthDataResult = await mcp.callTool("execute_protocol_action", {
+      actionType: "aave-v3/get-user-account-data",
+      params: {
+        network: config.position.chainId,
+        user: config.position.walletAddress,
+      },
+    });
 
-    const result = await runAgent(SYSTEM_PROMPT, userPrompt, mcp, tools);
+    const healthData = JSON.parse(healthDataResult);
+    console.log("Raw health data response:", JSON.stringify(healthData, null, 2));
+    
+    if (!healthData.result || !healthData.result.healthFactor) {
+      throw new Error("healthFactor not found in response");
+    }
+    
+    const rawHealthFactor = BigInt(healthData.result.healthFactor);
+    const actualHealthFactor = Number(rawHealthFactor) / 1e18;
 
-    for (const step of result.transcript) {
-      const icon = { thought: "🤔 THOUGHT", tool_call: "🔧 CALL", tool_result: "📄 RESULT", final: "✅ FINAL" }[step.type];
-      console.log(`${icon}   ${step.text}`);
+    console.log(`Raw health factor: ${rawHealthFactor.toString()}`);
+    console.log(`Actual health factor: ${actualHealthFactor.toFixed(4)}`);
+    console.log(`Threshold: ${config.position.healthFactorThreshold}`);
+
+    // Step 2: Check if at risk
+    if (actualHealthFactor >= config.position.healthFactorThreshold) {
+      const message = `Position is healthy. Current health factor: ${actualHealthFactor.toFixed(4)} (threshold: ${config.position.healthFactorThreshold}). No action needed.`;
+      console.log(message);
+      await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${message}`);
+      await mcp.disconnect();
+      return;
     }
 
-    console.log(`\n=== SUMMARY ===\n${result.finalText}\n`);
-    await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${result.finalText}`);
+    // Step 3: Position is at risk - execute repay with fixed amount
+    const repayAmount = "5000000"; // 5 USDT (6 decimals)
+    console.log(`Calculated repay amount: ${repayAmount} wei (${(Number(repayAmount) / 1e6).toFixed(6)} USDT)`);
+
+    const warningMessage = `⚠️ POSITION AT RISK! Health factor ${actualHealthFactor.toFixed(4)} is below threshold ${config.position.healthFactorThreshold}. Executing USDT repay action with amount: ${repayAmount}...`;
+    console.log(warningMessage);
+    await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${warningMessage}`);
+
+    // Execute the repay action directly from your wallet (includes approval logic)
+    console.log("Executing repay action directly from your wallet...");
+    const repayResult = await executeDirectRepay(
+      repayAmount,
+      config.position.walletAddress,
+      "2" // Variable rate mode
+    );
+
+    console.log("Repay execution result:", repayResult);
+    
+    // Check if the action was successful
+    if (!repayResult.success) {
+      const errorMessage = `❌ Repay action failed: ${repayResult.error || 'Unknown error'}`;
+      console.error(errorMessage);
+      await notifyLocal(`**Position Guardian run failed** (${new Date().toISOString()})\n${errorMessage}`);
+      await mcp.disconnect();
+      return;
+    }
+    
+    // Create transaction link
+    const transactionLink = repayResult.transactionHash 
+      ? `https://sepolia.basescan.org/tx/${repayResult.transactionHash}`
+      : "Transaction link not available";
+
+    const successMessage = `✅ Repay executed successfully!\nTransaction: ${transactionLink}\nHealth factor was ${actualHealthFactor.toFixed(4)} (below threshold ${config.position.healthFactorThreshold})`;
+    console.log(successMessage);
+    await notifyLocal(`**Position Guardian run** (${new Date().toISOString()})\n${successMessage}`);
+
   } catch (error) {
-    console.error("Guardian run failed:", error);
-    await notifyLocal(`**Position Guardian run failed** (${new Date().toISOString()})\nError: ${error}`);
+    const errorMessage = `Guardian execution failed: ${error instanceof Error ? error.message : String(error)}`;
+    console.error(errorMessage);
+    await notifyLocal(`**Position Guardian run failed** (${new Date().toISOString()})\n${errorMessage}`);
   } finally {
     await mcp.disconnect();
   }
