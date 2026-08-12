@@ -175,7 +175,7 @@ export function buildGuardianWorkflowNodes() {
         config: {
           actionType: "aave-v3/repay",
           network: config.position.chainId,
-          asset: "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", // Base Sepolia Aave V3 USDT underlying (verified against aave-address-book)
+          asset: "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a", // Base Sepolia USDT (debt asset)
           amount: "0", // placeholder — actual amount is computed by calculateRepayAmount() in runGuardian.ts at run time; this static node value isn't used by the live guardian:once/watch path
           onBehalfOf: config.position.walletAddress,
         },

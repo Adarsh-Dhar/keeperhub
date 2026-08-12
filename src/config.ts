@@ -30,13 +30,20 @@ export const config = {
     workflowId: optional("GUARDIAN_WORKFLOW_ID", ""),
   },
   assets: {
-    // Base Sepolia Aave V3 USDT underlying — the debt asset for this position
-    debtAsset: optional("DEBT_ASSET_ADDRESS", "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a"),
-    // Base Sepolia USDC — the collateral asset supplied by setup-aave-position
-    collateralAsset: optional("USDC", "0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f"),
+    // Debt asset address (what you borrowed) - required from .env
+    debtAsset: required("DEBT_ASSET_ADDRESS"),
+    // Collateral asset address (what you supplied) - required from .env
+    collateralAsset: required("COLLATERAL_ASSET_ADDRESS"),
+    // Actual ERC20 token addresses for wallet balance checks (these are the real tokens users hold)
+    walletDebtAsset: optional("WALLET_DEBT_ASSET_ADDRESS", "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a"), // Base Sepolia USDT (Aave underlying)
+    walletCollateralAsset: optional("WALLET_COLLATERAL_ASSET_ADDRESS", "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f"), // Base Sepolia USDC (Aave underlying)
   },
   rpc: {
     url: optional("RPC_URL", "https://sepolia.base.org"),
+  },
+  contracts: {
+    // Aave V3 Pool address - required from .env
+    aavePool: required("AAVE_POOL_ADDRESS"),
   },
   notify: {
     discordWebhookUrl: optional("DISCORD_WEBHOOK_URL"),

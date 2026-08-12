@@ -33,15 +33,15 @@ async function main() {
   const wallet = walletAddress.trim();
 
   // Aave V3 Base Sepolia contracts
-  const pool = "0x0E5Da3a3DAd88C62EA79750bF4996e35Ae0A5De6";
+  const pool = "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27";
   const faucet = "0xC959483DBa39aa9E78757139af0e9a2EDEb3f42D";
-  const usdc = "0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f";
-  const dai = "0x61619E9316D414091Aa4f3D94b913C5c5e0b8aa2";
+  const usdc = "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f";
+  const usdt = "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"; // Correct USDT address from Pimlico
 
   // Amounts
   const mintUsdcAmount = process.env.MINT_USDC_AMOUNT || "100000000"; // 100 USDC
   const supplyUsdcAmount = process.env.SUPPLY_USDC_AMOUNT || "9985000000"; // 9,985 USDC (user's balance)
-  const borrowDaiAmount = process.env.BORROW_DAI_AMOUNT || "5000000000000000000"; // 5 DAI
+  const borrowUsdtAmount = process.env.BORROW_USDT_AMOUNT || "5000000000"; // 5,000 USDT (user's balance)
 
   console.log("Setting up Aave V3 position on Base Sepolia");
   console.log(`Wallet: ${wallet}`);
@@ -68,10 +68,10 @@ async function main() {
       "Step 3: Supplying USDC as collateral"
     );
 
-    // Step 4: Borrow DAI
+    // Step 4: Borrow USDT
     await runCommand(
-      `cast send ${pool} "borrow(address,uint256,uint256,uint16,address)" ${dai} ${borrowDaiAmount} 2 0 ${wallet} --rpc-url ${rpcUrl} --private-key ${privateKey}`,
-      "Step 4: Borrowing DAI"
+      `cast send ${pool} "borrow(address,uint256,uint256,uint16,address)" ${usdt} ${borrowUsdtAmount} 2 0 ${wallet} --rpc-url ${rpcUrl} --private-key ${privateKey}`,
+      "Step 4: Borrowing USDT"
     );
 
     // Step 5: Check health factor

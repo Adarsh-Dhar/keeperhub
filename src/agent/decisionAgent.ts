@@ -9,9 +9,9 @@ export interface DecisionContext {
   totalCollateralBase: string;
   totalDebtBase: string;
   liquidationThresholdPct: number; // e.g. 86 for 8600 bps
-  debtAssetBalance: string; // USDT, human units
+  debtAssetBalance: string; // USDC, human units
   collateralAssetBalance: string; // USDC, human units
-  requiredRepayAmount: string; // USDT, human units
+  requiredRepayAmount: string; // USDC, human units
   requiredSupplyAmount: string; // USDC, human units
 }
 
@@ -33,8 +33,8 @@ Position data:
 - Liquidation threshold: ${ctx.liquidationThresholdPct}%
 
 Option A — Repay debt:
-- Wallet USDT balance: ${ctx.debtAssetBalance}
-- Amount required to repay: ${ctx.requiredRepayAmount} USDT
+- Wallet USDC balance: ${ctx.debtAssetBalance}
+- Amount required to repay: ${ctx.requiredRepayAmount} USDC
 - Effect: permanently reduces outstanding debt and the interest accruing on it.
 
 Option B — Supply more collateral:

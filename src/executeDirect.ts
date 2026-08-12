@@ -51,7 +51,7 @@ const ERC20_ABI = [
 ];
 
 const AAVE_POOL_ADDRESS = "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27" as `0x${string}`;
-const DEBT_ASSET_ADDRESS = "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a" as `0x${string}`; // Base Sepolia Aave V3 USDT underlying (verified against aave-address-book)
+const DEBT_ASSET_ADDRESS = "0xc04EbCEfb76672eA4dc3F6B1aDEF15aD66E5027C" as `0x${string}`; // Base Sepolia USDT (for ERC20 operations)
 
 export async function executeDirectRepay(
   amount: string,
