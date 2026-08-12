@@ -35,8 +35,8 @@ async function main() {
   // Aave V3 Base Sepolia contracts
   const pool = "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27";
   const faucet = "0xC959483DBa39aa9E78757139af0e9a2EDEb3f42D";
-  const usdc = "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f";
-  const usdt = "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"; // Correct USDT address from Pimlico
+  const usdc = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+  const usdt = "0x0a215D8ba66387DCA84B284D18c3B4ec3de6E54a";
 
   // Amounts
   const mintUsdcAmount = process.env.MINT_USDC_AMOUNT || "100000000"; // 100 USDC

@@ -3,7 +3,7 @@ import { createKeeperHubClient, KeeperHubMCP } from "./mcp/keeperhubClient.js";
 import { notifyLocal } from "./notify/logger.js";
 import { calculateRepayAmount, calculateSupplyAmount } from "./workflows/workflowDefinition.js";
 import { decideRepayVsSupply, DecisionContext } from "./agent/decisionAgent.js";
-import { createWalletClient, createPublicClient, http } from "viem";
+import { createWalletClient, createPublicClient, http, checksumAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
 import { readFileSync, writeFileSync, existsSync } from "fs";
@@ -97,7 +97,7 @@ const AAVE_POOL_ABI = [
   },
 ] as const;
 
-const AAVE_POOL_ADDRESS = config.contracts.aavePool as `0x${string}`;
+const AAVE_POOL_ADDRESS = checksumAddress(config.contracts.aavePool as `0x${string}`);
 
 async function approveTokenIfNeeded(tokenAddress: string, amount: bigint): Promise<boolean> {
   const privateKey = process.env.PRIVATE_KEY;
@@ -119,17 +119,18 @@ async function approveTokenIfNeeded(tokenAddress: string, amount: bigint): Promi
       transport: http(config.rpc.url),
     });
 
-    // Use the token address directly (already using wallet addresses)
-    const actualTokenAddress = tokenAddress;
+    // Use checksummed addresses
+    const actualTokenAddress = checksumAddress(tokenAddress as `0x${string}`);
+    const checksummedPool = checksumAddress(AAVE_POOL_ADDRESS);
 
     // Check current allowance - skip if contract doesn't respond
     let currentAllowance = BigInt(0);
     try {
       currentAllowance = await publicClient.readContract({
-        address: actualTokenAddress as `0x${string}`,
+        address: actualTokenAddress,
         abi: ERC20_ABI,
         functionName: "allowance",
-        args: [account.address, AAVE_POOL_ADDRESS],
+        args: [account.address, checksummedPool],
       }) as bigint;
     } catch (error) {
       console.log("⚠️ Cannot check allowance (contract not responding), assuming approval exists");
@@ -143,10 +144,10 @@ async function approveTokenIfNeeded(tokenAddress: string, amount: bigint): Promi
 
     console.log(`Approving Aave pool to spend ${amount.toString()} of ${actualTokenAddress}...`);
     const approveHash = await walletClient.writeContract({
-      address: actualTokenAddress as `0x${string}`,
+      address: actualTokenAddress,
       abi: ERC20_ABI,
       functionName: "approve",
-      args: [AAVE_POOL_ADDRESS, amount],
+      args: [checksummedPool, amount],
     });
 
     console.log(`✓ Approval transaction sent: ${approveHash}`);
@@ -183,15 +184,23 @@ async function executeDirectRepay(
       transport: http(config.rpc.url),
     });
 
-    // Use the actual asset address directly (already using wallet addresses)
-    const actualAsset = asset;
+    // Use checksummed addresses
+    const actualAsset = checksumAddress(asset as `0x${string}`);
+    const checksummedOnBehalfOf = checksumAddress(onBehalfOf as `0x${string}`);
 
     console.log(`Executing direct repay of ${amount} ${actualAsset} to Aave pool...`);
+    
+    // First approve the pool to spend the debt asset
+    const approvalSuccess = await approveTokenIfNeeded(actualAsset, BigInt(amount));
+    if (!approvalSuccess) {
+      return { success: false, error: "Failed to approve token spending" };
+    }
+    
     const repayHash = await walletClient.writeContract({
       address: AAVE_POOL_ADDRESS,
       abi: AAVE_POOL_ABI,
       functionName: "repay",
-      args: [actualAsset as `0x${string}`, BigInt(amount), 2n, onBehalfOf as `0x${string}`],
+      args: [actualAsset, BigInt(amount), 2n, checksummedOnBehalfOf],
     });
 
     console.log(`✓ Repay transaction sent: ${repayHash}`);
@@ -229,15 +238,23 @@ async function executeDirectSupply(
       transport: http(config.rpc.url),
     });
 
-    // Use the actual asset address directly (already using wallet addresses)
-    const actualAsset = asset;
+    // Use checksummed addresses
+    const actualAsset = checksumAddress(asset as `0x${string}`);
+    const checksummedOnBehalfOf = checksumAddress(onBehalfOf as `0x${string}`);
 
     console.log(`Executing direct supply of ${amount} ${actualAsset} to Aave pool...`);
+    
+    // First approve the pool to spend the collateral asset
+    const approvalSuccess = await approveTokenIfNeeded(actualAsset, BigInt(amount));
+    if (!approvalSuccess) {
+      return { success: false, error: "Failed to approve token spending" };
+    }
+    
     const supplyHash = await walletClient.writeContract({
       address: AAVE_POOL_ADDRESS,
       abi: AAVE_POOL_ABI,
       functionName: "supply",
-      args: [actualAsset as `0x${string}`, BigInt(amount), onBehalfOf as `0x${string}`, 0],
+      args: [actualAsset, BigInt(amount), checksummedOnBehalfOf, 0],
     });
 
     console.log(`✓ Supply transaction sent: ${supplyHash}`);
@@ -292,88 +309,12 @@ async function executeProtocolWrite(
   const simResult = JSON.parse(simResultRaw);
   console.log("Simulation result:", JSON.stringify(simResult, null, 2));
 
-  // Trust the simulation result - if it says insufficient balance, don't attempt execution
-  if (simResult.success === false) {
-    const errorString = simResultRaw.toLowerCase();
-    const isBalanceError = errorString.includes("transfer amount exceeds balance") ||
-                          errorString.includes("insufficient balance") ||
-                          errorString.includes("erc20: transfer amount exceeds");
-    
-    if (isBalanceError) {
-      const assetName = actionType === "aave-v3/repay" ? "USDT" : "USDC";
-      return {
-        success: false,
-        error: `Simulation failed: Insufficient ${assetName} balance. The tokens at your wallet address may not be transferable or may be locked in Aave. Please check your actual token balances on Base Sepolia explorer.`
-      };
-    }
+  // If simulation fails, return the actual error message instead of guessing
+  if (simResult.success === false || simResult.wouldRevert) {
+    return { success: false, error: `Simulation failed: ${simResultRaw}` };
   }
 
-  // Skip simulation due to Base Sepolia contract issues and go straight to direct execution
-  console.log("⚠️ Skipping simulation due to Base Sepolia contract issues. Proceeding directly to execution...");
-  const directAsset = actionType === "aave-v3/repay" ? config.assets.walletDebtAsset : config.assets.walletCollateralAsset;
-  const directAmount = params.amount as string;
-  const directOnBehalfOf = params.onBehalfOf as string;
-  
-  return await executeDirectAction(actionType, directAsset, directAmount, directOnBehalfOf);
-
-  if (simResult.wouldRevert || simResult.success === false) {
-    // Check if it's an allowance error and try to auto-approve
-    const errorString = simResultRaw.toLowerCase();
-    
-    // More specific error detection - only catch actual allowance errors
-    const isAllowanceError = errorString.includes("allowance") || 
-                            errorString.includes("approve") ||
-                            errorString.includes("erc20: insufficient allowance");
-    
-    // Check for balance errors
-    const isBalanceError = errorString.includes("transfer amount exceeds balance") ||
-                          errorString.includes("insufficient balance") ||
-                          errorString.includes("erc20: transfer amount exceeds");
-    
-    if (isBalanceError) {
-      const asset = actionType === "aave-v3/repay" ? config.assets.walletDebtAsset : config.assets.walletCollateralAsset;
-      const amount = params.amount as string;
-      const assetName = actionType === "aave-v3/repay" ? "USDT" : "USDC";
-      
-      return {
-        success: false,
-        error: `Insufficient ${assetName} balance in wallet. Required: ${amount}, available: insufficient. Please fund wallet with ${assetName} before retrying.`
-      };
-    }
-    
-    if (isAllowanceError) {
-      const asset = actionType === "aave-v3/repay" ? config.assets.walletDebtAsset : config.assets.walletCollateralAsset;
-      const amount = BigInt(params.amount as string);
-      
-      console.log("⚠️ Insufficient allowance detected, attempting auto-approval...");
-      const approvalSuccess = await approveTokenIfNeeded(asset, amount);
-      
-      if (!approvalSuccess) {
-        return {
-          success: false,
-          error: `Auto-approval failed. Please run manually: cast send ${asset} "approve(address,uint256)" 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27 115792089237316195423570985008687907853269984665640564039457584007913129639935 --rpc-url https://sepolia.base.org --private-key YOUR_PRIVATE_KEY`
-        };
-      }
-      
-      console.log("✓ Auto-approval successful, skipping simulation and proceeding directly to execution...");
-      // Try direct execution via viem instead of KeeperHub since we have approval
-      console.log("Attempting direct execution via viem (bypassing KeeperHub simulation)...");
-      const directAsset = actionType === "aave-v3/repay" ? config.assets.walletDebtAsset : config.assets.walletCollateralAsset;
-      const directAmount = params.amount as string;
-      const directOnBehalfOf = params.onBehalfOf as string;
-      
-      return await executeDirectAction(actionType, directAsset, directAmount, directOnBehalfOf);
-    } else {
-      // If simulation fails for other reasons, try direct execution
-      console.log("⚠️ Simulation failed, attempting direct execution via viem...");
-      const directAsset = actionType === "aave-v3/repay" ? config.assets.walletDebtAsset : config.assets.walletCollateralAsset;
-      const directAmount = params.amount as string;
-      const directOnBehalfOf = params.onBehalfOf as string;
-      
-      return await executeDirectAction(actionType, directAsset, directAmount, directOnBehalfOf);
-    }
-  }
-
+  // Simulation succeeded — proceed to real (non-simulate) KeeperHub execution
   console.log(`Simulation passed. Executing real ${actionType} via KeeperHub...`);
   const execResultRaw = await mcp.callTool("execute_protocol_action", {
     actionType,
@@ -410,6 +351,28 @@ async function executeProtocolWrite(
   return { success: true, transactionLink };
 }
 
+/**
+ * Fallback execution using direct contract calls with private key.
+ * This bypasses KeeperHub's wallet limitation and uses the user's own wallet
+ * where the Aave position actually exists.
+ */
+async function executeProtocolWriteDirect(
+  actionType: string,
+  asset: string,
+  amount: string,
+  onBehalfOf: string
+): Promise<WriteActionResult> {
+  console.log(`Using direct execution for ${actionType} (bypassing KeeperHub wallet limitation)`);
+  
+  if (actionType === "aave-v3/repay") {
+    return await executeDirectRepay(asset, amount, onBehalfOf);
+  } else if (actionType === "aave-v3/supply") {
+    return await executeDirectSupply(asset, amount, onBehalfOf);
+  }
+  
+  return { success: false, error: `Direct execution not implemented for ${actionType}` };
+}
+
 async function runOnce(): Promise<void> {
   const mcp = createKeeperHubClient();
 
@@ -434,11 +397,12 @@ async function runOnce(): Promise<void> {
   try {
     // --- Step 1: read the position (deterministic) ---
     console.log("\nFetching current health factor...");
+    const checksummedWallet = checksumAddress(config.position.walletAddress as `0x${string}`);
     const healthDataResult = await mcp.callTool("execute_protocol_action", {
       actionType: "aave-v3/get-user-account-data",
       params: {
         network: config.position.chainId,
-        user: config.position.walletAddress,
+        user: checksummedWallet,
       },
     });
 
@@ -449,7 +413,16 @@ async function runOnce(): Promise<void> {
     }
     const d = healthData.result;
 
-    const actualHealthFactor = Number(BigInt(d.healthFactor)) / 1e18;
+    // Handle the case where healthFactor is max uint256 (no debt = infinite health)
+    const healthFactorRaw = d.healthFactor;
+    const maxUint256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+    let actualHealthFactor: number;
+    
+    if (healthFactorRaw === maxUint256) {
+      actualHealthFactor = Infinity; // No debt means infinite health
+    } else {
+      actualHealthFactor = Number(BigInt(healthFactorRaw)) / 1e18;
+    }
 
     console.log("=== Position data ===");
     console.log(`Total collateral (base): ${d.totalCollateralBase}`);
@@ -549,7 +522,8 @@ async function runOnce(): Promise<void> {
 
     const finalActionType = action === "repay" ? "aave-v3/repay" : "aave-v3/supply";
 
-    const result = await executeProtocolWrite(mcp, finalActionType, params);
+    // Use direct execution to avoid KeeperHub wallet limitation
+    const result = await executeProtocolWriteDirect(finalActionType, asset, amount, config.position.walletAddress);
 
     if (result.success) {
       incrementExecutionCount(); // Track session executions
